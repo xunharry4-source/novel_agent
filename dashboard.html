@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PGA Worldview Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: #020617;
+            background-image: 
+                radial-gradient(at 0% 0%, hsla(192,83%,8%,1) 0, transparent 50%), 
+                radial-gradient(at 50% 0%, hsla(210,83%,12%,1) 0, transparent 50%), 
+                radial-gradient(at 100% 0%, hsla(202,83%,8%,1) 0, transparent 50%);
+            color: #f8fafc;
+            min-height: 100vh;
+        }
+        .glass {
+            background: rgba(15, 23, 42, 0.4);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+        .accent-glow {
+            box-shadow: 0 0 20px rgba(6, 182, 212, 0.2);
+        }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-7xl mx-auto space-y-8">
+        <!-- Header -->
+        <header class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+                <h1 class="text-4xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
+                    PGA 万象世界观控制台
+                </h1>
+                <p class="text-slate-400 mt-2">万象星际协议体 - 核心设定管理系统</p>
+            </div>
+            <nav class="flex gap-4">
+                <button onclick="switchTab('archive')" class="tab-btn active px-4 py-2 rounded-xl text-sm font-medium transition-all">文献档案库</button>
+                <button onclick="switchTab('agent')" class="tab-btn px-4 py-2 rounded-xl text-sm font-medium transition-all">Agent 工作区</button>
+            </nav>
+        </header>
+
+        <!-- Archive View (Default) -->
+        <div id="archive-view" class="tab-view space-y-8">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="glass p-6 rounded-3xl group hover:border-cyan-500/30 transition-all cursor-pointer">
+                    <div class="flex items-center gap-4">
+                        <div class="p-3 rounded-2xl bg-cyan-500/10 text-cyan-400"><i data-lucide="database"></i></div>
+                        <div>
+                            <div class="text-xs text-slate-500">已入库设定条目</div>
+                            <div id="count-docs" class="text-2xl font-semibold">--</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <!-- Sidebar: Categories & Search -->
+                <div class="space-y-6">
+                    <div class="glass p-6 rounded-3xl space-y-4">
+                        <h2 class="text-lg font-semibold flex items-center gap-2">
+                            <i data-lucide="search" class="w-5 h-5 text-cyan-400"></i>
+                            知识检索
+                        </h2>
+                        <input type="text" id="search-input" placeholder="输入星区、种族或物理能量..." 
+                            class="w-full bg-slate-900/50 border border-slate-700/50 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all">
+                        <button id="search-btn" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-3 rounded-2xl transition-all accent-glow">
+                            立即搜索
+                        </button>
+                    </div>
+
+                    <div class="glass p-6 rounded-3xl space-y-4 overflow-hidden">
+                        <h2 class="text-lg font-semibold flex items-center gap-2">
+                            <i data-lucide="layers" class="w-5 h-5 text-blue-400"></i>
+                            最近记录
+                        </h2>
+                        <div id="log-list" class="space-y-3 max-h-[400px] overflow-y-auto pr-2 scrollbar-hide">
+                            <!-- Logs inject here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Content Area -->
+                <div class="lg:col-span-2 space-y-6">
+                    <div id="main-content" class="glass p-8 rounded-[40px] min-h-[600px] relative overflow-hidden">
+                        <div class="absolute top-0 right-0 p-8 opacity-10"><i data-lucide="globe" class="w-32 h-32"></i></div>
+                        
+                        <div id="welcome-view">
+                            <h3 class="text-2xl font-bold mb-4">欢迎访问 PGA 文献档案库</h3>
+                            <p class="text-slate-400 leading-relaxed">
+                                请从左侧记录中选择设定条目，或使用搜索功能查找特定的星区、种族及其运行机制。
+                                Agent 审核逻辑会确保所有新增设定严格遵循**热力学定律**与**能量守恒定律**。
+                            </p>
+                        </div>
+
+                        <div id="detail-view" class="hidden space-y-6">
+                            <button onclick="showWelcome()" class="text-cyan-400 hover:text-cyan-300 text-sm flex items-center gap-1 mb-4">
+                                <i data-lucide="arrow-left" class="w-4 h-4"></i> 返回档案库
+                            </button>
+                            <h3 id="detail-title" class="text-3xl font-bold text-white"></h3>
+                            <div id="detail-content" class="prose prose-invert max-w-none text-slate-300 leading-relaxed whitespace-pre-wrap"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Agent Workspace View -->
+        <div id="agent-view" class="tab-view hidden space-y-8">
+            <div class="glass p-8 rounded-[40px] border-cyan-500/20 shadow-[0_0_50px_-12px_rgba(6,182,212,0.15)]">
+                <div class="flex items-center gap-3 mb-8">
+                    <div class="p-2 rounded-lg bg-cyan-500 text-white shadow-lg shadow-cyan-500/50"><i data-lucide="zap"></i></div>
+                    <h2 class="text-2xl font-bold">闭环迭代创作区</h2>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 h-[600px]">
+                    <!-- Left: Input & Interaction -->
+                    <div class="flex flex-col gap-4">
+                        <div class="flex-1 flex flex-col gap-4">
+                            <label class="text-sm text-slate-400 flex items-center gap-2"><i data-lucide="message-square" class="w-4 h-4"></i> 输入您的设定草案或指令</label>
+                            <textarea id="agent-input" placeholder="例如：增加一个位于室女座超星系团边缘的智械母舰设定..." 
+                                class="flex-1 bg-slate-900/50 border border-slate-700/50 rounded-3xl p-6 text-sm focus:outline-none focus:border-cyan-500 transition-all resize-none"></textarea>
+                        </div>
+                        <div class="flex gap-4">
+                            <button id="agent-run-btn" class="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-cyan-600/20">启动 Agent 生成</button>
+                        </div>
+                        
+                        <div id="agent-interaction" class="hidden space-y-4 pt-4 border-t border-slate-700/50">
+                            <input type="text" id="agent-feedback" placeholder="输入您的修改意见..." 
+                                class="w-full bg-slate-800/50 border border-slate-700/50 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
+                            <div class="flex gap-4">
+                                <button id="agent-feedback-btn" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-2xl transition-all">提交反馈</button>
+                                <button id="agent-approve-btn" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-2xl transition-all">批准入库</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Logic Visualization -->
+                    <div class="flex flex-col gap-4 overflow-hidden">
+                        <div class="flex items-center justify-between text-xs text-slate-500 px-2">
+                            <span>实时逻辑流 (Thinking & Audit)</span>
+                            <span id="agent-status" class="flex items-center gap-1 text-cyan-400">就绪</span>
+                        </div>
+                        <div id="agent-output" class="flex-1 bg-black/40 border border-slate-800 rounded-3xl p-6 overflow-y-auto space-y-6 font-mono text-xs leading-relaxed">
+                            <div class="text-slate-500 italic">等待指令启动...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Tab Management
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-view').forEach(v => v.classList.add('hidden'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active', 'bg-cyan-600', 'text-white'));
+            
+            document.getElementById(`${tabId}-view`).classList.remove('hidden');
+            const activeBtn = Array.from(document.querySelectorAll('.tab-btn'))
+                .find(b => b.onclick.toString().includes(tabId));
+            if (activeBtn) {
+                activeBtn.classList.add('active', 'bg-cyan-600', 'text-white');
+            }
+        }
+
+        const logList = document.getElementById('log-list');
+        const detailView = document.getElementById('detail-view');
+        const welcomeView = document.getElementById('welcome-view');
+        const detailTitle = document.getElementById('detail-title');
+        const detailContent = document.getElementById('detail-content');
+        const countDocs = document.getElementById('count-docs');
+
+        async function fetchLore() {
+            try {
+                const res = await fetch('/api/lore');
+                const data = await res.json();
+                if(countDocs) countDocs.innerText = data.length;
+                renderLogs(data);
+            } catch (err) {
+                console.error("API error:", err);
+            }
+        }
+
+        function renderLogs(data) {
+            logList.innerHTML = data.map(item => `
+                <div onclick="showDetail('${item.name || item.query}', \`${item.content.replace(/`/g, '\\`')}\`)" 
+                    class="p-4 rounded-2xl bg-slate-800/30 border border-slate-700/50 hover:border-cyan-500/50 hover:bg-slate-800/50 transition-all cursor-pointer group text-left">
+                    <div class="text-xs text-cyan-400 font-medium mb-1">${item.category || 'General'}</div>
+                    <div class="text-sm font-semibold group-hover:text-cyan-400 transition-colors line-clamp-1">${item.name || item.query}</div>
+                    <div class="text-[10px] text-slate-500 mt-2">${item.timestamp}</div>
+                </div>
+            `).join('');
+        }
+
+        function showDetail(title, content) {
+            detailTitle.innerText = title;
+            detailContent.innerText = content;
+            welcomeView.classList.add('hidden');
+            detailView.classList.remove('hidden');
+        }
+
+        function showWelcome() {
+            welcomeView.classList.remove('hidden');
+            detailView.classList.add('hidden');
+        }
+
+        // Agent Logic
+        let current_thread_id = null;
+
+        async function runAgent() {
+            const query = document.getElementById('agent-input').value;
+            if (!query) return;
+
+            current_thread_id = 'web_user_' + Date.now();
+            const outputDiv = document.getElementById('agent-output');
+            const statusSpan = document.getElementById('agent-status');
+            
+            statusSpan.innerText = "生成中...";
+            outputDiv.innerHTML = `<div class="text-cyan-400 animate-pulse">正在进入 PGA 0-4 逻辑轨道...</div>`;
+
+            try {
+                const res = await fetch('/api/agent/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, thread_id: current_thread_id })
+                });
+                const data = await res.json();
+                renderAgentState(data);
+            } catch (err) {
+                outputDiv.innerHTML = `<div class="text-red-400">错误: ${err.message}</div>`;
+            } finally {
+                statusSpan.innerText = "就绪";
+            }
+        }
+
+        async function submitFeedback(isApprove = false) {
+            if (!current_thread_id) {
+                alert("请先发起生成任务");
+                return;
+            }
+            const feedbackInput = document.getElementById('agent-feedback');
+            const feedback = isApprove ? "批准" : feedbackInput.value;
+            if (!feedback && !isApprove) return;
+
+            const statusSpan = document.getElementById('agent-status');
+            statusSpan.innerText = isApprove ? "入库中..." : "迭代中...";
+
+            try {
+                const res = await fetch('/api/agent/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ feedback, thread_id: current_thread_id })
+                });
+                const data = await res.json();
+                if (isApprove) {
+                    alert("设定已成功存入 PGA 数据库！");
+                    location.reload();
+                } else {
+                    renderAgentState(data);
+                    feedbackInput.value = '';
+                }
+            } catch (err) {
+                alert("操作失败: " + err.message);
+            } finally {
+                statusSpan.innerText = "就绪";
+            }
+        }
+
+        function renderAgentState(data) {
+            const outputDiv = document.getElementById('agent-output');
+            const interactionDiv = document.getElementById('agent-interaction');
+            const statusSpan = document.getElementById('agent-status');
+            
+            if (data.status_message) {
+                statusSpan.innerText = data.status_message;
+            }
+
+            let html = "";
+            if (data.status_message) {
+                html += `<div class="text-[10px] text-cyan-400/60 uppercase tracking-widest mb-4 flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping"></span>
+                    当前进程: ${data.status_message}
+                </div>`;
+            }
+
+            if (data.review_log) {
+                html += `<div class="bg-slate-900/50 p-4 rounded-2xl border ${data.is_approved ? 'border-emerald-500/30' : 'border-amber-500/30'}">
+                    <div class="text-[10px] text-slate-500 uppercase tracking-widest mb-2">逻辑自审报告 (迭代: ${data.audit_count})</div>
+                    <div class="text-[11px] ${data.is_approved ? 'text-emerald-400' : 'text-amber-400'} whitespace-pre-wrap">${data.review_log}</div>
+                </div>`;
+            }
+            
+            if (data.proposal) {
+                html += `<div class="bg-slate-900/50 p-4 rounded-2xl border border-cyan-500/20">
+                    <div class="text-[10px] text-slate-500 uppercase tracking-widest mb-2">Agent 最终提案 (总循环: ${data.iterations})</div>
+                    <div class="text-[13px] text-slate-200 whitespace-pre-wrap">${data.proposal}</div>
+                </div>`;
+            }
+
+            outputDiv.innerHTML = html;
+            interactionDiv.classList.remove('hidden');
+            lucide.createIcons();
+        }
+
+        // Search logic
+        document.getElementById('search-btn').onclick = async () => {
+            const query = document.getElementById('search-input').value;
+            if(!query) return;
+            const res = await fetch('/api/search', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({query})
+            });
+            const data = await res.json();
+            renderLogs(data.map(d => ({
+                query: d.metadata.name || d.metadata.category,
+                content: d.content,
+                category: 'Search Result',
+                timestamp: 'Just now'
+            })));
+        };
+
+        // Event listeners
+        document.getElementById('agent-run-btn').onclick = runAgent;
+        document.getElementById('agent-feedback-btn').onclick = () => submitFeedback(false);
+        document.getElementById('agent-approve-btn').onclick = () => submitFeedback(true);
+
+        fetchLore();
+        lucide.createIcons();
+    </script>
+</body>
+</html>

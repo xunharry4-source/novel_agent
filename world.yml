@@ -1,0 +1,215 @@
+app:
+description: 万象星际协议体（PGA）世界观专用编辑 Chatflow（修复 IF/ELSE 类型版）
+icon: "🌌"
+icon_background: "#D1E9FF"
+mode: advanced-chat
+name: 万象星际协议体世界观编辑器_v2
+use_icon_as_answer_icon: false
+
+kind: app
+version: 0.1.6
+
+workflow:
+conversation_variables: []
+environment_variables: []
+
+features:
+opening_statement: |
+这里是《万象星际协议体》世界观编辑器（修复版）。
+我会自动判断你的需求属于：
+- 冲突审校
+- 设定修订
+- 世界观扩产
+
+graph:
+edges:
+- source: start
+target: router
+type: custom
+
+```
+  - source: router
+    target: if_conflict
+    type: custom
+
+  - source: if_conflict
+    sourceHandle: "true"
+    target: kb_conflict
+    type: custom
+
+  - source: kb_conflict
+    target: llm_conflict
+    type: custom
+
+  - source: llm_conflict
+    target: answer_conflict
+    type: custom
+
+  - source: if_conflict
+    sourceHandle: "false"
+    target: if_modify
+    type: custom
+
+  - source: if_modify
+    sourceHandle: "true"
+    target: kb_modify
+    type: custom
+
+  - source: kb_modify
+    target: llm_modify
+    type: custom
+
+  - source: llm_modify
+    target: answer_modify
+    type: custom
+
+  - source: if_modify
+    sourceHandle: "false"
+    target: kb_expand
+    type: custom
+
+  - source: kb_expand
+    target: llm_expand
+    type: custom
+
+  - source: llm_expand
+    target: answer_expand
+    type: custom
+
+nodes:
+
+  - id: start
+    type: start
+    data:
+      title: 开始
+
+  - id: router
+    type: code
+    data:
+      title: 世界观意图路由
+      code_language: python3
+      code: |
+        def main(query: str) -> dict:
+            q = (query or "").strip()
+
+            def has_any(words):
+                return any(w in q for w in words)
+
+            is_conflict = has_any(["冲突","矛盾","违反","审校","逻辑检查"])
+            is_modify = has_any(["修改","修订","重写","改写","优化"])
+
+            return {
+                "is_conflict": is_conflict,
+                "is_modify": is_modify,
+                "normalized_query": q
+            }
+      outputs:
+        is_conflict:
+          type: boolean
+        is_modify:
+          type: boolean
+        normalized_query:
+          type: string
+
+  - id: if_conflict
+    type: if-else
+    data:
+      title: 是否冲突审校
+      cases:
+        - case_id: "true"
+          conditions:
+            - variable_selector:
+                - router
+                - is_conflict
+              comparison_operator: "="
+              value: true
+              varType: boolean
+
+  - id: if_modify
+    type: if-else
+    data:
+      title: 是否设定修订
+      cases:
+        - case_id: "true"
+          conditions:
+            - variable_selector:
+                - router
+                - is_modify
+              comparison_operator: "="
+              value: true
+              varType: boolean
+
+  - id: kb_conflict
+    type: knowledge-retrieval
+    data:
+      title: 冲突审校知识检索
+      dataset_ids:
+        - REPLACE_DATASET_ID_1
+
+  - id: kb_modify
+    type: knowledge-retrieval
+    data:
+      title: 修订编辑知识检索
+      dataset_ids:
+        - REPLACE_DATASET_ID_2
+
+  - id: kb_expand
+    type: knowledge-retrieval
+    data:
+      title: 世界观扩产知识检索
+      dataset_ids:
+        - REPLACE_DATASET_ID_3
+
+  - id: llm_conflict
+    type: llm
+    data:
+      title: 冲突审校 LLM
+      model:
+        provider: openai_api_compatible
+        name: gpt-4o-mini
+      prompt_template:
+        - role: system
+          text: |
+            你是世界观一致性审校器。
+            不得违反热力学、能量守恒与PGA规则。
+
+        - role: user
+          text: "{{#sys.query#}}"
+
+  - id: llm_modify
+    type: llm
+    data:
+      title: 修订编辑 LLM
+      model:
+        provider: openai_api_compatible
+        name: gpt-4o-mini
+      prompt_template:
+        - role: user
+          text: "{{#sys.query#}}"
+
+  - id: llm_expand
+    type: llm
+    data:
+      title: 扩产编辑 LLM
+      model:
+        provider: openai_api_compatible
+        name: gpt-4o-mini
+      prompt_template:
+        - role: user
+          text: "{{#sys.query#}}"
+
+  - id: answer_conflict
+    type: answer
+    data:
+      answer: "{{#llm_conflict.text#}}"
+
+  - id: answer_modify
+    type: answer
+    data:
+      answer: "{{#llm_modify.text#}}"
+
+  - id: answer_expand
+    type: answer
+    data:
+      answer: "{{#llm_expand.text#}}"
+```

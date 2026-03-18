@@ -1,0 +1,456 @@
+app:
+  description: 万象星际协议体知识库保存器（下拉选择知识库修复版）
+  icon: "💾"
+  icon_background: "#D1E9FF"
+  mode: advanced-chat
+  name: 万象星际协议体知识库保存器_修复版
+  use_icon_as_answer_icon: false
+
+kind: app
+version: 0.1.2
+
+workflow:
+  conversation_variables: []
+  environment_variables: []
+
+  features:
+    opening_statement: |
+      这里是《万象星际协议体》知识库保存器。
+      这个 Chatflow 不负责创作，只负责把最终确认好的世界观内容写入知识库。
+
+      用法：
+      1. 先选择目标知识库
+      2. 如果 document_id 留空：新增文档
+      3. 如果提供 document_id：更新并替换原文档
+
+    retriever_resource:
+      enabled: false
+
+    suggested_questions:
+      - 请把这段内容保存到种族档案库
+      - 用这段最终版本替换原有条目
+      - 将这个新设定追加到势力国家库
+      - 更新奥族圣所条目到知识库
+
+    suggested_questions_after_answer:
+      enabled: false
+
+    speech_to_text:
+      enabled: false
+
+    text_to_speech:
+      enabled: false
+      language: ""
+      voice: ""
+
+    sensitive_word_avoidance:
+      enabled: false
+
+    file_upload:
+      enabled: false
+      allowed_file_types:
+        - image
+      allowed_file_extensions:
+        - .JPG
+        - .JPEG
+        - .PNG
+      allowed_file_upload_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+          - local_file
+          - remote_url
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+
+  graph:
+    edges:
+      - source: "start"
+        sourceHandle: "source"
+        target: "dataset_mapper"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: start
+          targetType: code
+          isInIteration: false
+
+      - source: "dataset_mapper"
+        sourceHandle: "source"
+        target: "router"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: code
+          targetType: code
+          isInIteration: false
+
+      - source: "router"
+        sourceHandle: "source"
+        target: "if_update"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: code
+          targetType: if-else
+          isInIteration: false
+
+      - source: "if_update"
+        sourceHandle: "true"
+        target: "http_update"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: if-else
+          targetType: http-request
+          isInIteration: false
+
+      - source: "http_update"
+        sourceHandle: "source"
+        target: "answer_update"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: http-request
+          targetType: answer
+          isInIteration: false
+
+      - source: "if_update"
+        sourceHandle: "false"
+        target: "http_create"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: if-else
+          targetType: http-request
+          isInIteration: false
+
+      - source: "http_create"
+        sourceHandle: "source"
+        target: "answer_create"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: http-request
+          targetType: answer
+          isInIteration: false
+
+    nodes:
+      - id: "start"
+        type: custom
+        position:
+          x: 40
+          y: 240
+        positionAbsolute:
+          x: 40
+          y: 240
+        width: 300
+        height: 260
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 开始
+          desc: ""
+          type: start
+          variables:
+            - variable: dataset_choice
+              label: 选择知识库
+              type: select
+              required: true
+              options:
+                - PGA总纲库
+                - 种族档案库
+                - 势力国家库
+                - 战争机制库
+                - 星域生态位库
+
+            - variable: document_id
+              label: 文档ID（留空则新增）
+              type: text-input
+              required: false
+              max_length: 200
+
+            - variable: document_name
+              label: 文档名称
+              type: text-input
+              required: true
+              max_length: 200
+
+            - variable: final_text
+              label: 最终世界观正文
+              type: paragraph
+              required: true
+              max_length: 50000
+
+            - variable: api_key
+              label: 知识库 API Key
+              type: text-input
+              required: true
+              max_length: 500
+
+      - id: "dataset_mapper"
+        type: custom
+        position:
+          x: 390
+          y: 250
+        positionAbsolute:
+          x: 390
+          y: 250
+        width: 280
+        height: 54
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 知识库映射器
+          desc: ""
+          type: code
+          code_language: python3
+          code: |
+            def main(dataset_choice: str) -> dict:
+                mapping = {
+                    "PGA总纲库": "11111111-1111-1111-1111-111111111111",
+                    "种族档案库": "22222222-2222-2222-2222-222222222222",
+                    "势力国家库": "33333333-3333-3333-3333-333333333333",
+                    "战争机制库": "44444444-4444-4444-4444-444444444444",
+                    "星域生态位库": "55555555-5555-5555-5555-555555555555"
+                }
+
+                return {
+                    "dataset_id": mapping.get(dataset_choice, ""),
+                    "dataset_label": dataset_choice or "未知知识库"
+                }
+          outputs:
+            dataset_id:
+              type: string
+              children: null
+            dataset_label:
+              type: string
+              children: null
+          variables:
+            - variable: dataset_choice
+              value_selector:
+                - start
+                - dataset_choice
+
+      - id: "router"
+        type: custom
+        position:
+          x: 720
+          y: 250
+        positionAbsolute:
+          x: 720
+          y: 250
+        width: 260
+        height: 54
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 判断新增还是更新
+          desc: ""
+          type: code
+          code_language: python3
+          code: |
+            def main(document_id: str) -> dict:
+                doc_id = (document_id or "").strip()
+                should_update = len(doc_id) > 0
+                return {
+                    "should_update": should_update,
+                    "clean_document_id": doc_id
+                }
+          outputs:
+            should_update:
+              type: boolean
+              children: null
+            clean_document_id:
+              type: string
+              children: null
+          variables:
+            - variable: document_id
+              value_selector:
+                - start
+                - document_id
+
+      - id: "if_update"
+        type: custom
+        position:
+          x: 1030
+          y: 240
+        positionAbsolute:
+          x: 1030
+          y: 240
+        width: 250
+        height: 126
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 是否更新旧文档
+          desc: ""
+          type: if-else
+          cases:
+            - case_id: "true"
+              id: "update_case"
+              logical_operator: and
+              conditions:
+                - id: "update_condition"
+                  variable_selector:
+                    - router
+                    - should_update
+                  comparison_operator: "="
+                  value: true
+                  varType: boolean
+
+      - id: "http_update"
+        type: custom
+        position:
+          x: 1350
+          y: 80
+        positionAbsolute:
+          x: 1350
+          y: 80
+        width: 340
+        height: 170
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 更新并替换旧文档
+          desc: ""
+          type: http-request
+          method: post
+          url: "https://api.dify.ai/v1/datasets/{{#dataset_mapper.dataset_id#}}/documents/{{#router.clean_document_id#}}/update-by-text"
+          headers:
+            Authorization: "Bearer {{#start.api_key#}}"
+            Content-Type: "application/json"
+          body:
+            type: json
+            data: |
+              {
+                "name": "{{#start.document_name#}}",
+                "text": "{{#start.final_text#}}",
+                "process_rule": {
+                  "mode": "automatic"
+                }
+              }
+          timeout:
+            max_connect_timeout: 10
+            max_read_timeout: 120
+            max_write_timeout: 120
+          retry_config:
+            enabled: true
+            max_retries: 2
+            retry_interval: 1000
+
+      - id: "http_create"
+        type: custom
+        position:
+          x: 1350
+          y: 420
+        positionAbsolute:
+          x: 1350
+          y: 420
+        width: 340
+        height: 190
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 新增知识库文档
+          desc: ""
+          type: http-request
+          method: post
+          url: "https://api.dify.ai/v1/datasets/{{#dataset_mapper.dataset_id#}}/document/create-by-text"
+          headers:
+            Authorization: "Bearer {{#start.api_key#}}"
+            Content-Type: "application/json"
+          body:
+            type: json
+            data: |
+              {
+                "name": "{{#start.document_name#}}",
+                "text": "{{#start.final_text#}}",
+                "indexing_technique": "high_quality",
+                "doc_form": "text_model",
+                "doc_language": "Chinese",
+                "process_rule": {
+                  "mode": "automatic"
+                }
+              }
+          timeout:
+            max_connect_timeout: 10
+            max_read_timeout: 120
+            max_write_timeout: 120
+          retry_config:
+            enabled: true
+            max_retries: 2
+            retry_interval: 1000
+
+      - id: "answer_update"
+        type: custom
+        position:
+          x: 1740
+          y: 80
+        positionAbsolute:
+          x: 1740
+          y: 80
+        width: 320
+        height: 140
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 输出更新结果
+          desc: ""
+          type: answer
+          answer: |
+            # 知识库更新结果
+
+            已执行：**更新并替换旧文档**
+
+            - 目标知识库：{{#dataset_mapper.dataset_label#}}
+            - dataset_id：{{#dataset_mapper.dataset_id#}}
+            - document_id：{{#router.clean_document_id#}}
+            - document_name：{{#start.document_name#}}
+
+            ## API 返回
+            {{#http_update.body#}}
+          variables: []
+
+      - id: "answer_create"
+        type: custom
+        position:
+          x: 1740
+          y: 420
+        positionAbsolute:
+          x: 1740
+          y: 420
+        width: 320
+        height: 140
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 输出新增结果
+          desc: ""
+          type: answer
+          answer: |
+            # 知识库新增结果
+
+            已执行：**新增知识库文档**
+
+            - 目标知识库：{{#dataset_mapper.dataset_label#}}
+            - dataset_id：{{#dataset_mapper.dataset_id#}}
+            - document_name：{{#start.document_name#}}
+
+            ## API 返回
+            {{#http_create.body#}}
+          variables: []
+
+    viewport:
+      x: 100
+      y: 60
+      zoom: 0.68

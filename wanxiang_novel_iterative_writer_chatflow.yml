@@ -1,0 +1,875 @@
+app:
+  description: 万象星际协议体小说迭代书写器
+  icon: "📖"
+  icon_background: "#D1E9FF"
+  mode: advanced-chat
+  name: 万象星际协议体小说迭代书写器
+  use_icon_as_answer_icon: false
+
+kind: app
+version: 0.1.0
+
+workflow:
+  conversation_variables: []
+  environment_variables: []
+
+  features:
+    opening_statement: |
+      这里是《万象星际协议体》小说迭代书写器。
+      你可以让我：
+      - 续写当前场景
+      - 生成下一章
+      - 重写当前段落
+      - 检查连续性
+      - 生成本轮摘要
+
+    retriever_resource:
+      enabled: true
+
+    suggested_questions:
+      - 继续写这一段，让冲突升级
+      - 生成第12章正文
+      - 把这段改得更冷峻、更硬科幻
+      - 检查这段是否和前文冲突
+      - 生成本轮写作摘要
+
+    suggested_questions_after_answer:
+      enabled: false
+
+    speech_to_text:
+      enabled: false
+
+    text_to_speech:
+      enabled: false
+      language: ""
+      voice: ""
+
+    sensitive_word_avoidance:
+      enabled: false
+
+    file_upload:
+      enabled: false
+
+  graph:
+    edges:
+      - source: "start"
+        sourceHandle: "source"
+        target: "classifier"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: start
+          targetType: question-classifier
+          isInIteration: false
+
+      - source: "classifier"
+        sourceHandle: "continue_scene"
+        target: "kb_continue"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: question-classifier
+          targetType: knowledge-retrieval
+          isInIteration: false
+
+      - source: "kb_continue"
+        sourceHandle: "source"
+        target: "llm_continue"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: knowledge-retrieval
+          targetType: llm
+          isInIteration: false
+
+      - source: "llm_continue"
+        sourceHandle: "source"
+        target: "answer_continue"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: llm
+          targetType: answer
+          isInIteration: false
+
+      - source: "classifier"
+        sourceHandle: "next_chapter"
+        target: "kb_chapter"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: question-classifier
+          targetType: knowledge-retrieval
+          isInIteration: false
+
+      - source: "kb_chapter"
+        sourceHandle: "source"
+        target: "llm_chapter"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: knowledge-retrieval
+          targetType: llm
+          isInIteration: false
+
+      - source: "llm_chapter"
+        sourceHandle: "source"
+        target: "answer_chapter"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: llm
+          targetType: answer
+          isInIteration: false
+
+      - source: "classifier"
+        sourceHandle: "rewrite"
+        target: "kb_rewrite"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: question-classifier
+          targetType: knowledge-retrieval
+          isInIteration: false
+
+      - source: "kb_rewrite"
+        sourceHandle: "source"
+        target: "llm_rewrite"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: knowledge-retrieval
+          targetType: llm
+          isInIteration: false
+
+      - source: "llm_rewrite"
+        sourceHandle: "source"
+        target: "answer_rewrite"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: llm
+          targetType: answer
+          isInIteration: false
+
+      - source: "classifier"
+        sourceHandle: "continuity_check"
+        target: "kb_check"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: question-classifier
+          targetType: knowledge-retrieval
+          isInIteration: false
+
+      - source: "kb_check"
+        sourceHandle: "source"
+        target: "llm_check"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: knowledge-retrieval
+          targetType: llm
+          isInIteration: false
+
+      - source: "llm_check"
+        sourceHandle: "source"
+        target: "answer_check"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: llm
+          targetType: answer
+          isInIteration: false
+
+      - source: "classifier"
+        sourceHandle: "round_summary"
+        target: "kb_summary"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: question-classifier
+          targetType: knowledge-retrieval
+          isInIteration: false
+
+      - source: "kb_summary"
+        sourceHandle: "source"
+        target: "llm_summary"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: knowledge-retrieval
+          targetType: llm
+          isInIteration: false
+
+      - source: "llm_summary"
+        sourceHandle: "source"
+        target: "answer_summary"
+        targetHandle: "target"
+        type: custom
+        data:
+          sourceType: llm
+          targetType: answer
+          isInIteration: false
+
+    nodes:
+      - id: "start"
+        type: custom
+        position:
+          x: 40
+          y: 260
+        positionAbsolute:
+          x: 40
+          y: 260
+        width: 320
+        height: 260
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 开始
+          desc: ""
+          type: start
+          variables:
+            - variable: novel_title
+              label: 小说名
+              type: text-input
+              required: true
+              max_length: 200
+
+            - variable: chapter_no
+              label: 当前章节号
+              type: text-input
+              required: false
+              max_length: 50
+
+            - variable: scene_goal
+              label: 本轮写作目标
+              type: paragraph
+              required: false
+              max_length: 5000
+
+            - variable: current_text
+              label: 当前已有正文
+              type: paragraph
+              required: false
+              max_length: 50000
+
+            - variable: style_choice
+              label: 文风
+              type: select
+              required: true
+              options:
+                - 严肃硬科幻
+                - 冷峻史诗
+                - 群像叙事
+                - 阴郁悬疑
+
+            - variable: length_target
+              label: 目标长度
+              type: select
+              required: true
+              options:
+                - 300字
+                - 800字
+                - 1500字
+                - 3000字
+
+      - id: "classifier"
+        type: custom
+        position:
+          x: 420
+          y: 260
+        positionAbsolute:
+          x: 420
+          y: 260
+        width: 280
+        height: 180
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 写作意图分类
+          desc: ""
+          type: question-classifier
+          model:
+            provider: openai_api_compatible
+            name: gpt-4o-mini
+            mode: chat
+            completion_params:
+              temperature: 0.1
+          query_variable_selector:
+            - sys
+            - query
+          classes:
+            - id: continue_scene
+              name: 续写当前场景
+              description: 用户希望基于当前文本和既有设定继续往下写一段或一场戏
+            - id: next_chapter
+              name: 生成下一章
+              description: 用户希望在已有剧情基础上直接生成下一章或本章主体正文
+            - id: rewrite
+              name: 重写当前内容
+              description: 用户希望不改变事实和剧情顺序，只重写表达、节奏、细节或文风
+            - id: continuity_check
+              name: 连续性检查
+              description: 用户希望检查前后文、人设、设定、时间线、科技规则是否冲突
+            - id: round_summary
+              name: 生成本轮摘要
+              description: 用户希望把本轮写作结果整理成可供后续继续写作的摘要
+
+      - id: "kb_continue"
+        type: custom
+        position:
+          x: 760
+          y: 40
+        positionAbsolute:
+          x: 760
+          y: 40
+        width: 290
+        height: 92
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 续写知识检索
+          desc: ""
+          type: knowledge-retrieval
+          dataset_ids:
+            - 11111111-1111-1111-1111-111111111111
+            - 22222222-2222-2222-2222-222222222222
+            - 33333333-3333-3333-3333-333333333333
+          retrieval_mode: multiple
+          query_variable_selector:
+            - sys
+            - query
+          multiple_retrieval_config:
+            top_k: 8
+            reranking_enable: true
+            reranking_mode: reranking_model
+            reranking_model:
+              provider: siliconflow
+              model: netease-youdao/bce-reranker-base_v1
+
+      - id: "kb_chapter"
+        type: custom
+        position:
+          x: 760
+          y: 190
+        positionAbsolute:
+          x: 760
+          y: 190
+        width: 290
+        height: 92
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 新章知识检索
+          desc: ""
+          type: knowledge-retrieval
+          dataset_ids:
+            - 11111111-1111-1111-1111-111111111111
+            - 22222222-2222-2222-2222-222222222222
+            - 33333333-3333-3333-3333-333333333333
+            - 44444444-4444-4444-4444-444444444444
+          retrieval_mode: multiple
+          query_variable_selector:
+            - sys
+            - query
+          multiple_retrieval_config:
+            top_k: 10
+            reranking_enable: true
+            reranking_mode: reranking_model
+            reranking_model:
+              provider: siliconflow
+              model: netease-youdao/bce-reranker-base_v1
+
+      - id: "kb_rewrite"
+        type: custom
+        position:
+          x: 760
+          y: 340
+        positionAbsolute:
+          x: 760
+          y: 340
+        width: 290
+        height: 92
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 重写知识检索
+          desc: ""
+          type: knowledge-retrieval
+          dataset_ids:
+            - 11111111-1111-1111-1111-111111111111
+            - 33333333-3333-3333-3333-333333333333
+          retrieval_mode: multiple
+          query_variable_selector:
+            - sys
+            - query
+          multiple_retrieval_config:
+            top_k: 6
+            reranking_enable: true
+            reranking_mode: reranking_model
+            reranking_model:
+              provider: siliconflow
+              model: netease-youdao/bce-reranker-base_v1
+
+      - id: "kb_check"
+        type: custom
+        position:
+          x: 760
+          y: 490
+        positionAbsolute:
+          x: 760
+          y: 490
+        width: 290
+        height: 92
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 连续性检查检索
+          desc: ""
+          type: knowledge-retrieval
+          dataset_ids:
+            - 11111111-1111-1111-1111-111111111111
+            - 22222222-2222-2222-2222-222222222222
+            - 33333333-3333-3333-3333-333333333333
+            - 44444444-4444-4444-4444-444444444444
+          retrieval_mode: multiple
+          query_variable_selector:
+            - sys
+            - query
+          multiple_retrieval_config:
+            top_k: 10
+            reranking_enable: true
+            reranking_mode: reranking_model
+            reranking_model:
+              provider: siliconflow
+              model: netease-youdao/bce-reranker-base_v1
+
+      - id: "kb_summary"
+        type: custom
+        position:
+          x: 760
+          y: 640
+        positionAbsolute:
+          x: 760
+          y: 640
+        width: 290
+        height: 92
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 摘要检索
+          desc: ""
+          type: knowledge-retrieval
+          dataset_ids:
+            - 22222222-2222-2222-2222-222222222222
+            - 33333333-3333-3333-3333-333333333333
+            - 44444444-4444-4444-4444-444444444444
+          retrieval_mode: multiple
+          query_variable_selector:
+            - sys
+            - query
+          multiple_retrieval_config:
+            top_k: 6
+            reranking_enable: true
+            reranking_mode: reranking_model
+            reranking_model:
+              provider: siliconflow
+              model: netease-youdao/bce-reranker-base_v1
+
+      - id: "llm_continue"
+        type: custom
+        position:
+          x: 1110
+          y: 30
+        positionAbsolute:
+          x: 1110
+          y: 30
+        width: 330
+        height: 130
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 续写器
+          desc: ""
+          type: llm
+          context:
+            enabled: true
+            variable_selector:
+              - kb_continue
+              - result
+          model:
+            provider: openai_api_compatible
+            name: gpt-4o-mini
+            mode: chat
+            completion_params:
+              temperature: 0.75
+          prompt_template:
+            - id: continue_system
+              role: system
+              text: |
+                你是《万象星际协议体》小说连载写作器。
+                必须遵守世界观、前文、人物关系和硬科幻规则。
+                不得违反热力学、能量守恒、PGA原则。
+                只推进当前场景，不要无端跳章。
+
+                文风：{{#start.style_choice#}}
+                目标长度：{{#start.length_target#}}
+
+                上下文：
+                <context>
+                {{#context#}}
+                </context>
+
+                当前已有正文：
+                {{#start.current_text#}}
+
+                本轮目标：
+                {{#start.scene_goal#}}
+
+                输出格式：
+                # 小说正文
+                （正文）
+
+                ## 本轮推进点
+                - 
+
+                ## 新增伏笔
+                - 
+
+                ## 下轮可继续方向
+                - 
+            - id: continue_user
+              role: user
+              text: "{{#sys.query#}}"
+
+      - id: "llm_chapter"
+        type: custom
+        position:
+          x: 1110
+          y: 180
+        positionAbsolute:
+          x: 1110
+          y: 180
+        width: 330
+        height: 130
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 新章生成器
+          desc: ""
+          type: llm
+          context:
+            enabled: true
+            variable_selector:
+              - kb_chapter
+              - result
+          model:
+            provider: openai_api_compatible
+            name: gpt-4o-mini
+            mode: chat
+            completion_params:
+              temperature: 0.72
+          prompt_template:
+            - id: chapter_system
+              role: system
+              text: |
+                你是《万象星际协议体》小说章节生成器。
+                必须先依据前文与世界观自然衔接，再生成本章正文。
+                要保持硬科幻风格、人设一致和事件连续性。
+
+                小说名：{{#start.novel_title#}}
+                章节号：{{#start.chapter_no#}}
+                文风：{{#start.style_choice#}}
+                目标长度：{{#start.length_target#}}
+
+                上下文：
+                <context>
+                {{#context#}}
+                </context>
+
+                本轮目标：
+                {{#start.scene_goal#}}
+
+                输出格式：
+                # 本章正文
+                （正文）
+
+                ## 本章结构摘要
+                - 
+
+                ## 本章新增冲突/伏笔
+                - 
+
+                ## 下章衔接点
+                - 
+            - id: chapter_user
+              role: user
+              text: "{{#sys.query#}}"
+
+      - id: "llm_rewrite"
+        type: custom
+        position:
+          x: 1110
+          y: 330
+        positionAbsolute:
+          x: 1110
+          y: 330
+        width: 330
+        height: 130
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 重写器
+          desc: ""
+          type: llm
+          context:
+            enabled: true
+            variable_selector:
+              - kb_rewrite
+              - result
+          model:
+            provider: openai_api_compatible
+            name: gpt-4o-mini
+            mode: chat
+            completion_params:
+              temperature: 0.55
+          prompt_template:
+            - id: rewrite_system
+              role: system
+              text: |
+                你是《万象星际协议体》小说重写器。
+                只改写法，不改事实，不改事件顺序，不改角色关系。
+                不新增未被授权的新设定。
+
+                文风：{{#start.style_choice#}}
+
+                上下文：
+                <context>
+                {{#context#}}
+                </context>
+
+                当前已有正文：
+                {{#start.current_text#}}
+
+                输出格式：
+                # 重写结果
+                ## 重写正文
+                （正文）
+
+                ## 保留不变的事实
+                - 
+
+                ## 修改说明
+                - 
+            - id: rewrite_user
+              role: user
+              text: "{{#sys.query#}}"
+
+      - id: "llm_check"
+        type: custom
+        position:
+          x: 1110
+          y: 480
+        positionAbsolute:
+          x: 1110
+          y: 480
+        width: 330
+        height: 130
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 连续性审校器
+          desc: ""
+          type: llm
+          context:
+            enabled: true
+            variable_selector:
+              - kb_check
+              - result
+          model:
+            provider: openai_api_compatible
+            name: gpt-4o-mini
+            mode: chat
+            completion_params:
+              temperature: 0.2
+          prompt_template:
+            - id: check_system
+              role: system
+              text: |
+                你是《万象星际协议体》连续性审校器。
+                只检查连续性，不做文学评价。
+
+                检查项目：
+                - 时间顺序
+                - 人设一致性
+                - 世界观设定一致性
+                - 势力关系
+                - 科技与物理规则
+
+                上下文：
+                <context>
+                {{#context#}}
+                </context>
+
+                当前已有正文：
+                {{#start.current_text#}}
+
+                输出格式：
+                # 连续性检查报告
+                ## 明确冲突
+                ## 疑似冲突
+                ## 人设偏移
+                ## 设定穿帮
+                ## 修复建议
+            - id: check_user
+              role: user
+              text: "{{#sys.query#}}"
+
+      - id: "llm_summary"
+        type: custom
+        position:
+          x: 1110
+          y: 630
+        positionAbsolute:
+          x: 1110
+          y: 630
+        width: 330
+        height: 130
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 本轮摘要器
+          desc: ""
+          type: llm
+          context:
+            enabled: true
+            variable_selector:
+              - kb_summary
+              - result
+          model:
+            provider: openai_api_compatible
+            name: gpt-4o-mini
+            mode: chat
+            completion_params:
+              temperature: 0.3
+          prompt_template:
+            - id: summary_system
+              role: system
+              text: |
+                你是《万象星际协议体》本轮写作摘要器。
+                你的任务是把本轮正文整理成供下一轮继续写作使用的摘要。
+
+                上下文：
+                <context>
+                {{#context#}}
+                </context>
+
+                当前已有正文：
+                {{#start.current_text#}}
+
+                输出格式：
+                # 本轮写作摘要
+                ## 发生事件
+                ## 角色状态变化
+                ## 新增设定
+                ## 新增伏笔
+                ## 下轮衔接点
+            - id: summary_user
+              role: user
+              text: "{{#sys.query#}}"
+
+      - id: "answer_continue"
+        type: custom
+        position:
+          x: 1490
+          y: 30
+        positionAbsolute:
+          x: 1490
+          y: 30
+        width: 270
+        height: 100
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 输出续写
+          desc: ""
+          type: answer
+          answer: "{{#llm_continue.text#}}"
+
+      - id: "answer_chapter"
+        type: custom
+        position:
+          x: 1490
+          y: 180
+        positionAbsolute:
+          x: 1490
+          y: 180
+        width: 270
+        height: 100
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 输出章节
+          desc: ""
+          type: answer
+          answer: "{{#llm_chapter.text#}}"
+
+      - id: "answer_rewrite"
+        type: custom
+        position:
+          x: 1490
+          y: 330
+        positionAbsolute:
+          x: 1490
+          y: 330
+        width: 270
+        height: 100
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 输出重写
+          desc: ""
+          type: answer
+          answer: "{{#llm_rewrite.text#}}"
+
+      - id: "answer_check"
+        type: custom
+        position:
+          x: 1490
+          y: 480
+        positionAbsolute:
+          x: 1490
+          y: 480
+        width: 270
+        height: 100
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 输出审校
+          desc: ""
+          type: answer
+          answer: "{{#llm_check.text#}}"
+
+      - id: "answer_summary"
+        type: custom
+        position:
+          x: 1490
+          y: 630
+        positionAbsolute:
+          x: 1490
+          y: 630
+        width: 270
+        height: 100
+        sourcePosition: right
+        targetPosition: left
+        data:
+          title: 输出摘要
+          desc: ""
+          type: answer
+          answer: "{{#llm_summary.text#}}"
+
+    viewport:
+      x: 80
+      y: 40
+      zoom: 0.62

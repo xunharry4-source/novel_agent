@@ -1,0 +1,839 @@
+app:
+  description: 万象星际协议体小说章节迭代器（状态管理对齐版）
+  icon: 🤖
+  icon_background: '#D1E9FF'
+  mode: advanced-chat
+  name: 万象星际协议体小说章节迭代器_v4_fixed_scope
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/openai:0.3.0@99770a45f77910fe0f64c985524f4fe2294fc6ea25cbf1053ba6bddd7604d850
+    version: null
+kind: app
+version: 0.6.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions: [.JPG, .JPEG, .PNG, .GIF, .WEBP, .SVG]
+      allowed_file_types: [image]
+      allowed_file_upload_methods: [local_file, remote_url]
+      enabled: false
+      fileUploadConfig:
+        attachment_image_file_size_limit: 2
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        file_upload_limit: 50
+        image_file_batch_limit: 10
+        image_file_size_limit: 10
+        single_chunk_attachment_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods: [local_file, remote_url]
+      number_limits: 3
+    opening_statement: "这里是《万象星际协议体》小说章节迭代器。\n\n"
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions:
+    - 写第一章
+    - 采纳
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInLoop: false
+        sourceType: start
+        targetType: question-classifier
+      id: edge-1
+      selected: false
+      source: '1001'
+      sourceHandle: source
+      target: '1002'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: question-classifier
+        targetType: llm
+      id: edge-2
+      selected: false
+      source: '1002'
+      sourceHandle: accept_branch
+      target: '1003'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: answer
+      id: edge-3
+      selected: false
+      source: '1003'
+      sourceHandle: source
+      target: '1004'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: question-classifier
+        targetType: loop
+      id: edge-4
+      selected: false
+      source: '1002'
+      sourceHandle: revise_branch
+      target: '2000'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: loop
+        targetType: if-else
+      id: edge-5
+      selected: false
+      source: '2000'
+      sourceHandle: source
+      target: '3001'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: answer
+      id: edge-6
+      selected: false
+      source: '3001'
+      sourceHandle: 'true'
+      target: '3002'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: answer
+      id: edge-7
+      selected: false
+      source: '3001'
+      sourceHandle: 'false'
+      target: '3003'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '2000'
+        sourceType: loop-start
+        targetType: code
+      id: inner-edge-1
+      selected: false
+      source: '2001'
+      sourceHandle: source
+      target: '2101'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '2000'
+        sourceType: code
+        targetType: knowledge-retrieval
+      id: inner-edge-2
+      selected: false
+      source: '2101'
+      sourceHandle: source
+      target: '2102'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '2000'
+        sourceType: knowledge-retrieval
+        targetType: llm
+      id: inner-edge-3
+      selected: false
+      source: '2102'
+      sourceHandle: source
+      target: '2103'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '2000'
+        sourceType: llm
+        targetType: knowledge-retrieval
+      id: inner-edge-4
+      selected: false
+      source: '2103'
+      sourceHandle: source
+      target: '2104'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '2000'
+        sourceType: knowledge-retrieval
+        targetType: llm
+      id: inner-edge-5
+      selected: false
+      source: '2104'
+      sourceHandle: source
+      target: '2105'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '2000'
+        sourceType: llm
+        targetType: code
+      id: inner-edge-6
+      selected: false
+      source: '2105'
+      sourceHandle: source
+      target: '2106'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '2000'
+        sourceType: code
+        targetType: assigner
+      id: inner-edge-7
+      selected: false
+      source: '2106'
+      sourceHandle: source
+      target: '2107'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    nodes:
+    - data:
+        desc: ''
+        selected: false
+        title: 开始
+        type: start
+        variables:
+        - label: 小说名
+          max_length: 200
+          options: []
+          required: true
+          type: text-input
+          variable: novel_title
+        - label: 章节号
+          max_length: 50
+          options: []
+          required: false
+          type: text-input
+          variable: chapter_no
+        - label: 本轮目标
+          max_length: 5000
+          options: []
+          required: false
+          type: paragraph
+          variable: scene_goal
+        - label: 当前正文
+          max_length: 50000
+          options: []
+          required: false
+          type: paragraph
+          variable: current_text
+        - label: 文风
+          options:
+          - 严肃硬科幻
+          - 冷峻史诗
+          - 群像叙事
+          - 阴郁悬疑
+          required: true
+          type: select
+          variable: style_choice
+        - label: 目标长度
+          options:
+          - 300字
+          - 800字
+          - 1500字
+          - 3000字
+          required: true
+          type: select
+          variable: length_target
+      height: 239
+      id: '1001'
+      position:
+        x: 40
+        y: 240
+      positionAbsolute:
+        x: 40
+        y: 240
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        classes:
+        - description: 用户明确表示采纳
+          id: accept_branch
+          name: 采纳
+        - description: 用户提出修改意见
+          id: revise_branch
+          name: 修改或生成
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.1
+          mode: chat
+          name: gpt-3.5-turbo
+          provider: langgenius/openai/openai
+        query_variable_selector:
+        - sys
+        - query
+        selected: false
+        title: 意图分类
+        type: question-classifier
+        vision:
+          enabled: false
+      height: 170
+      id: '1002'
+      position:
+        x: 450
+        y: 250
+      positionAbsolute:
+        x: 450
+        y: 250
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        break_conditions:
+        - comparison_operator: '='
+          id: cond-pass
+          value: true
+          varType: boolean
+          variable_selector:
+          - '2000'
+          - review_pass_state
+        - comparison_operator: '='
+          id: cond-limit
+          value: '3'
+          varType: number
+          variable_selector:
+          - '2000'
+          - current_loop
+        desc: 自动状态管理循环
+        error_handle_mode: terminated
+        height: 532
+        logical_operator: or
+        loop_count: 10
+        loop_variables:
+        - id: 18cd4d0e-5b6c-4b6c-8a2e-4e6c2e4631e4
+          label: current_draft
+          value:
+          - '1001'
+          - current_text
+          value_type: variable
+          var_type: string
+        - id: f5660049-284f-41a7-b301-fd24176a711c
+          label: review_feedback
+          value: 初始生成
+          value_type: constant
+          var_type: string
+        - id: 8d007d06-f2c9-4be5-8ff6-cd4381c13c60
+          label: review_pass_state
+          value: false
+          value_type: constant
+          var_type: boolean
+        - id: 23623c75-7184-4a2e-8226-466c2e4631e4
+          label: current_loop
+          value: '1'
+          value_type: constant
+          var_type: number
+        selected: false
+        start_node_id: '2001'
+        title: 迭代修稿循环
+        type: loop
+        width: 1358
+      height: 532
+      id: '2000'
+      position:
+        x: 820
+        y: 250
+      positionAbsolute:
+        x: 820
+        y: 250
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 1358
+      zIndex: 1
+    - data:
+        desc: ''
+        isInLoop: true
+        loop_id: '2000'
+        selected: false
+        title: ''
+        type: loop-start
+      draggable: false
+      height: 48
+      id: '2001'
+      parentId: '2000'
+      position:
+        x: 24
+        y: 68
+      positionAbsolute:
+        x: 844
+        y: 318
+      selectable: false
+      type: custom-loop-start
+      width: 44
+      zIndex: 1002
+    - data:
+        code: "def main(novel_title: str, chapter_no: str, scene_goal: str, base_text:\
+          \ str) -> dict:\n    preview = (base_text or \"\").strip()[:500]\n    query\
+          \ = f\"小说：{novel_title} 章节：{chapter_no} 目标：{scene_goal} 背景：{preview}\"\n\
+          \    return {\"retrieval_query\": query}\n"
+        code_language: python3
+        desc: ''
+        isInLoop: true
+        loop_id: '2000'
+        outputs:
+          retrieval_query:
+            children: null
+            type: string
+        selected: false
+        title: 检索查询构建器
+        type: code
+        variables:
+        - value_selector:
+          - '1001'
+          - novel_title
+          variable: novel_title
+        - value_selector:
+          - '1001'
+          - chapter_no
+          variable: chapter_no
+        - value_selector:
+          - '1001'
+          - scene_goal
+          variable: scene_goal
+        - value_selector:
+          - '2000'
+          - current_draft
+          variable: base_text
+      height: 52
+      id: '2101'
+      parentId: '2000'
+      position:
+        x: 100
+        y: 150
+      positionAbsolute:
+        x: 920
+        y: 400
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 1002
+    - data:
+        dataset_ids: [Di0EXXc5rHaXjxt+lcZI+IXKbbp0yvgyhBjffKDw1bEzCra9mpvQfqLV55/oiGSC]
+        desc: ''
+        isInLoop: true
+        loop_id: '2000'
+        query_variable_selector:
+        - '2101'
+        - retrieval_query
+        retrieval_mode: multiple
+        multiple_retrieval_config:
+          top_k: 4
+          reranking_enable: false
+          reranking_mode: reranking_model
+          reranking_model:
+            provider: ""
+            model: ""
+        selected: false
+        title: 写作检索
+        type: knowledge-retrieval
+      height: 90
+      id: '2102'
+      parentId: '2000'
+      position:
+        x: 450
+        y: 150
+      positionAbsolute:
+        x: 1270
+        y: 400
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 1002
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - '2102'
+          - result
+        desc: ''
+        isInLoop: true
+        loop_id: '2000'
+        model:
+          completion_params: {}
+          mode: chat
+          name: gpt-3.5-turbo
+          provider: langgenius/openai/openai
+        prompt_template:
+        - role: system
+          text: "你是小说修改器。\n当前草稿: {{#2000.current_draft#}}\n反馈: {{#2000.review_feedback#}}\n知识库: {{#context#}}\n请输出修正后的正文。\n"
+        - role: user
+          text: "{{#sys.query#}}"
+        selected: false
+        title: 写作修改器
+        type: llm
+        vision:
+          enabled: false
+      height: 88
+      id: '2103'
+      parentId: '2000'
+      position:
+        x: 800
+        y: 150
+      positionAbsolute:
+        x: 1620
+        y: 400
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 1002
+    - data:
+        dataset_ids: [Di0EXXc5rHaXjxt+lcZI+IXKbbp0yvgyhBjffKDw1bEzCra9mpvQfqLV55/oiGSC]
+        desc: ''
+        isInLoop: true
+        loop_id: '2000'
+        query_variable_selector:
+        - '2103'
+        - text
+        retrieval_mode: multiple
+        multiple_retrieval_config:
+          top_k: 4
+          reranking_enable: false
+          reranking_mode: reranking_model
+          reranking_model:
+            provider: ""
+            model: ""
+        selected: false
+        title: 审核检索
+        type: knowledge-retrieval
+      height: 90
+      id: '2104'
+      parentId: '2000'
+      position:
+        x: 450
+        y: 350
+      positionAbsolute:
+        x: 1270
+        y: 600
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 1002
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - '2104'
+          - result
+        desc: ''
+        isInLoop: true
+        loop_id: '2000'
+        model:
+          completion_params: {}
+          mode: chat
+          name: gpt-3.5-turbo
+          provider: langgenius/openai/openai
+        prompt_template:
+        - role: system
+          text: "你是审核器。正文: {{#2103.text#}}。知识库: {{#context#}}。\n若符合要求，输出 review_pass: true，否则给出反馈意见。\n"
+        - role: user
+          text: 审核开始
+        selected: false
+        title: 审核器
+        type: llm
+        vision:
+          enabled: false
+      height: 88
+      id: '2105'
+      parentId: '2000'
+      position:
+        x: 800
+        y: 350
+      positionAbsolute:
+        x: 1620
+        y: 600
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 1002
+    - data:
+        code: "def main(review_text: str) -> dict:\n    is_pass = \"review_pass: true\"\
+          \ in (review_text or \"\").lower()\n    return {\"review_pass\": is_pass}\n"
+        code_language: python3
+        desc: ''
+        isInLoop: true
+        loop_id: '2000'
+        outputs:
+          review_pass:
+            children: null
+            type: boolean
+        selected: false
+        title: 审核解析
+        type: code
+        variables:
+        - value_selector:
+          - '2105'
+          - text
+          variable: review_text
+      height: 52
+      id: '2106'
+      parentId: '2000'
+      position:
+        x: 1100
+        y: 150
+      positionAbsolute:
+        x: 1920
+        y: 400
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 1002
+    - data:
+        desc: ''
+        isInIteration: false
+        isInLoop: true
+        items:
+        - input_type: variable
+          operation: over-write
+          value:
+          - '2103'
+          - text
+          variable_selector:
+          - '2000'
+          - current_draft
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '2105'
+          - text
+          variable_selector:
+          - '2000'
+          - review_feedback
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '2106'
+          - review_pass
+          variable_selector:
+          - '2000'
+          - review_pass_state
+          write_mode: over-write
+        - input_type: constant
+          operation: +=
+          value: 1
+          variable_selector:
+          - '2000'
+          - current_loop
+          write_mode: over-write
+        loop_id: '2000'
+        selected: true
+        title: 循环状态更新
+        type: assigner
+        version: '2'
+      height: 162
+      id: '2107'
+      parentId: '2000'
+      position:
+        x: 1100
+        y: 350
+      positionAbsolute:
+        x: 1920
+        y: 600
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 1002
+    - data:
+        cases:
+        - case_id: 'true'
+          id: 'case_pass'
+          logical_operator: and
+          conditions:
+          - id: 'cond_pass'
+            comparison_operator: '='
+            value: true
+            varType: boolean
+            variable_selector:
+            - '2000'
+            - review_pass_state
+        desc: ''
+        selected: false
+        title: 结果判断
+        type: if-else
+      height: 124
+      id: '3001'
+      position:
+        x: 2211
+        y: 201
+      positionAbsolute:
+        x: 2211
+        y: 201
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        answer: "### ✅ 审核通过\n\n{{#2000.current_draft#}}\n"
+        desc: ''
+        selected: false
+        title: 通过
+        type: answer
+      height: 119
+      id: '3002'
+      position:
+        x: 2450
+        y: 300
+      positionAbsolute:
+        x: 2450
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        answer: "### ❌ 未通过迭代限制\n\n**最终草稿：**\n\n{{#2000.current_draft#}}\n\n\n**审核反馈：**\n\n{{#2000.review_feedback#}}\n"
+        desc: ''
+        selected: false
+        title: 未通过
+        type: answer
+      height: 153
+      id: '3003'
+      position:
+        x: 2450
+        y: 600
+      positionAbsolute:
+        x: 2450
+        y: 600
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params: {}
+          mode: chat
+          name: gpt-4o-mini
+          provider: langgenius/openai_api_compatible/openai_api_compatible
+        prompt_template:
+        - role: user
+          text: 采纳
+        selected: false
+        title: 采纳处理器
+        type: llm
+        vision:
+          enabled: false
+      height: 94
+      id: '1003'
+      position:
+        x: 820
+        y: 50
+      positionAbsolute:
+        x: 820
+        y: 50
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        answer: 已采纳。
+        desc: ''
+        selected: false
+        title: 完成
+        type: answer
+      height: 100
+      id: '1004'
+      position:
+        x: 1200
+        y: 50
+      positionAbsolute:
+        x: 1200
+        y: 50
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    viewport:
+      x: -1613.5
+      y: -219
+      zoom: 1
+  rag_pipeline_variables: []
