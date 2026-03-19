@@ -1,15 +1,27 @@
-from flask import Flask, jsonify, request, send_file
+"""
+API 入口模块 (App API) - PGA 小说创作引擎后端服务
+
+本模块提供了基于 Flask 的 RESTful API 接口，负责连接前端 UI 与后端的 LangGraph Agents。
+其核心职责包括：
+1. 状态装载与持久化: 维护会话线程 (thread_id)，通过 LangGraph Checkpointer 实现状态恢复。
+2. 异常处理与自愈: 捕获 API 限制错误 (429)，并自动触发 API Key 旋转机制。
+3. 文献检索与管理: 提供统一的资料搜索和模板存取接口。
+4. 人机交互路由: 将用户反馈正确引导至对应的 Agent 暂停点。
+"""
+from flask import Flask, request, jsonify, render_template, send_from_directory, send_file
 import os
 import json
 import traceback
 
 # Import shared utilities
 from lore_utils import (
-    get_llm, 
-    get_vector_store, 
-    rotate_api_key, 
-    get_all_templates, 
+    get_llm,
+    get_vector_store,
+    get_mongodb_db,
+    rotate_api_key,
+    get_category_template,
     upsert_category_template,
+    get_all_templates,
     delete_category_template,
     add_new_category
 )

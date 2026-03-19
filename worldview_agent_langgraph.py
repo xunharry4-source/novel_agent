@@ -1,3 +1,15 @@
+"""
+Worldview Agent (世界观 Agent) - PGA 0-4 协议小说创作引擎核心组件
+
+本模块实现了基于 LangGraph 的世界观管理工作流。它采用 "生成-审计-人工确认-同步" 的闭环模式，
+确保创意产出符合“万象星际”底层物理规则（PGA 0-4 架构）。
+
+设计思路 (Design Philosophy):
+1. 0-4 逻辑架构: 强制将设定拆分为 定义(0)、入场(1)、冲突(2)、优先级(3) 和 独立性(4) 五个维度。
+2. 逻辑隔离: 严禁不同类别的设定（如物理机制与地缘政治）在同一节点中混淆。
+3. 人机协作 (Human-in-the-loop): 使用 LangGraph 的 interrupt 机制，在核心设定入库前强制人工审核。
+4. RAG 驱动: 每次生成都会从 MongoDB (全文) 和 ChromaDB (向量) 检索相关上下文。
+"""
 import os
 import json
 from typing import Annotated, TypedDict, List, Union
@@ -22,6 +34,22 @@ from lore_utils import (
 # 0. State Definition
 # ==========================================
 class AgentState(TypedDict):
+    """
+    Agent 运行时的状态机上下文。
+    
+    Attributes:
+        query: 用户的原始输入请求。
+        context: 检索到的相关背景知识。
+        proposal: Agent 生成的当前草案/提案（通常为 JSON 格式）。
+        review_log: 审计节点生成的逻辑一致性报告。
+        user_feedback: 用户在中断节点输入的反馈或指令。
+        iterations: 当前任务经历的生成迭代次数。
+        audit_count: 当前草案经历的自审修正次数。
+        is_approved: 标记当前提案是否已被审计通过或人类批准。
+        category: 识别出的设定分类（如 race, faction 等）。
+        doc_id: 关联的文档 ID。
+        status_message: 用于 UI 显示的实时状态描述。
+    """
     query: str
     context: str
     proposal: str
@@ -98,7 +126,15 @@ CATEGORY_LOGIC_TEMPLATES = {
 # ==========================================
 
 def generator_node(state: AgentState):
-    """生成节点"""
+    """
+    生成节点 (Proposal Generator)。
+    
+    责任:
+    1. 分类识别: 根据用户 query 自动判定所属世界观维度 (race, faction, etc.)。
+    2. 上下文组装: 调用 RAG 检索文献库 (MongoDB) 和向量库 (ChromaDB) 中的相关冲突/背景。
+    3. 模板注入: 获取对应分类的 JSON 模板，确保输出格式合规。
+    4. 创作生成: 调用 LLM 生成符合 PGA 0-4 逻辑的设定提案。
+    """
     print(f"\n[DEBUG] generator_node entry. State keys: {list(state.keys())}")
     query = state.get('query', '')
     if not query:
@@ -214,6 +250,14 @@ TASK: 请完成设定提案。必须输出为 JSON 格式。
 
 
 def reviewer_node(state: AgentState):
+    """
+    审计节点 (Logic Reviewer)。
+    
+    责任:
+    1. 一致性检查: 验证提案是否违反 PGA 底层物理规则 (如能量守恒)。
+    2. 隔离性审计: 检查提案是否跨越了逻辑边界 (如在种族设定中讨论地缘政治)。
+    3. 逻辑闭环: 如果审计不通过，将 is_approved 设为 False，触发图回到 generator_node 进行修正。
+    """
     print(f"\n[DEBUG] reviewer_node entry. State keys: {list(state.keys())}")
     query = state.get('query', '')
     proposal = state.get('proposal', '')
@@ -260,6 +304,13 @@ def reviewer_node(state: AgentState):
         return {"review_log": res.content, "is_approved": False, "audit_count": int(count) + 1, "status_message": "审核解析异常"}
 
 def human_node(state: AgentState):
+    """
+    人工节点 (Human-in-the-loop Gate)。
+    
+    责任:
+    1. 中断执行: 在 Web 模式下发出 interrupt 信号，挂起当前线程，等待 UI 层的 Command(resume=...) 指令。
+    2. 交互入口: 允许人类创作者对 Agent 的提案进行最终核准或提出修改意见。
+    """
     print(f"\n[DEBUG] human_node entry. State keys: {list(state.keys())}")
     proposal = state.get('proposal', '')
     category = state.get('category', 'general')
@@ -279,6 +330,13 @@ def human_node(state: AgentState):
     return {"user_feedback": user_input, "is_approved": user_input == "批准", "status_message": "正在处理您的反馈..."}
 
 def saver_node(state: AgentState):
+    """
+    存储节点 (Sync Committer)。
+    
+    责任:
+    1. 事务写入: 将最终获批的设定同步写入本地磁盘 (worldview_db.json) 和向量库 (ChromaDB)。
+    2. 状态收尾: 清理会话状态，准备进入下一个创作循环。
+    """
     print(f"\n[DEBUG] saver_node entry. State keys: {list(state.keys())}")
     doc = {
         "category": state.get('category', 'general'),

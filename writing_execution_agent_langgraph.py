@@ -1,3 +1,15 @@
+"""
+Writing Execution Agent (正文执行 Agent) - PGA 小说创作引擎核心组件
+
+本模块负责根据大纲和世界观设定，生成具体的小说章节正文。
+设计思路:
+1. 场次拆解 (Scene Breaking): 将大纲中的单一章节进一步细化为一系列具体场次，实现更精准的节奏控制。
+2. 逻辑快照 (Logic Snapshot): 
+   - 每次编写场次前，自动检索相关设定（RAG）。
+   - 编写完成后，生成“人物状态”和“场景环境”的逻辑快照，确保下一场次写作时设定不偏航。
+3. 视觉引导: 自动生成视觉快照描述，帮助创作者通过画面感进行微调。
+4. 闭环审计: 对生成的正文进行逻辑矛盾审计（如人物突然出现在不可能出现的地方）。
+"""
 import os
 import json
 import datetime
@@ -20,6 +32,18 @@ from lore_utils import (
 # 0. State Definition
 # ==========================================
 class WritingState(TypedDict):
+    """
+    正文执行 Agent 运行时的状态机上下文。
+    
+    Attributes:
+        outline_id: 关联的大纲 ID。
+        scene_list: 本章节拆解后的场次列表。
+        active_scene_index: 当前工作场次的索引。
+        draft_content: 生成的正文初稿。
+        char_status_summary: 场次结束后的角色状态快照。
+        scene_status_summary: 场次结束后的场景环境快照。
+        is_audit_passed: 逻辑审计是否通过。
+    """
     # 输入信息
     outline_id: str             # 已保存的大纲 ID
     outline_content: str        # 大纲全文内容 (用于参考)

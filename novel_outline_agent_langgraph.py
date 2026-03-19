@@ -1,3 +1,12 @@
+"""
+Novel Outline Agent (小说大纲 Agent) - PGA 小说创作引擎核心组件
+
+本模块负责根据用户需求和已有的世界观设定（Lore），生成结构化的小说大纲。
+设计思路:
+1. 节拍控制: 强制生成符合标准文学结构的大纲（如三幕式或英雄之旅）。
+2. 设定对齐: 自动从 RAG 文献库中提取世界观禁令与规则，确保剧情不“吃书”。
+3. 冲突驱动: 分析设定中的矛盾点（如不同势力的能量争端），将其转化为核心剧情冲突。
+"""
 import os
 import json
 from typing import Annotated, TypedDict, List
@@ -20,6 +29,18 @@ from lore_utils import (
 # 0. State Definition
 # ==========================================
 class OutlineState(TypedDict):
+    """
+    大纲 Agent 运行时的状态机上下文。
+    
+    Attributes:
+        query: 用户对小说的初步设想或修改要求。
+        context: 检索到的相关世界观背景知识。
+        proposal: Agent 生成的当前大纲提案。
+        review_log: 逻辑审计日志。
+        user_feedback: 用户对大纲的反馈。
+        is_approved: 是否通过逻辑审核或人类确认。
+        status_message: 进度描述。
+    """
     query: str             # 用户的小说想法/需求
     context: str           # 检索到的世界观背景
     proposal: str          # 当前生成的大纲草案
