@@ -239,12 +239,13 @@ TASK: 请完成设定提案。必须输出为 JSON 格式。
 """
     
     res = get_llm(json_mode=True).invoke(full_prompt)
-    curr_iterations = state.get('iterations', 0)
+    _iter_val = state.get('iterations', 0)
+    curr_iterations = int(_iter_val) if isinstance(_iter_val, (int, str)) else 0
     
     return {
         "proposal": res.content, 
         "category": category,
-        "iterations": int(curr_iterations) + 1, 
+        "iterations": curr_iterations + 1, 
         "status_message": f"[{category_info['title']}] 提议已生成并进入逻辑审查..."
     }
 
@@ -260,7 +261,7 @@ def reviewer_node(state: AgentState):
     """
     print(f"\n[DEBUG] reviewer_node entry. State keys: {list(state.keys())}")
     query = state.get('query', '')
-    proposal = state.get('proposal', '')
+    proposal = str(state.get('proposal') or '')
     print(f"[DEBUG] Entering reviewer_node (proposal length: {len(proposal)})")
     category = state.get('category', 'general')
     category_info = CATEGORY_LOGIC_TEMPLATES.get(category, {"title": "一般世界观", "logic": "遵循PGA底层物理与逻辑。"})
@@ -281,7 +282,8 @@ def reviewer_node(state: AgentState):
 
 请根据规则审核，输出 JSON: {{"status": "合理/不合理", "audit_log": "...", "category_purity": "纯粹/混淆"}}
 """
-    count = state.get('audit_count', 0)
+    _count_val = state.get('audit_count', 0)
+    count = int(_count_val) if isinstance(_count_val, (int, str)) else 0
     res = get_llm(json_mode=True).invoke(full_prompt)
     try:
         audit_data = parse_json_safely(res.content)
@@ -296,12 +298,12 @@ def reviewer_node(state: AgentState):
         return {
             "review_log": audit_data.get("audit_log", res.content), 
             "is_approved": is_ok,
-            "audit_count": int(count) + 1,
+            "audit_count": count + 1,
             "status_message": msg
         }
     except Exception as e:
         print(f"[DEBUG] Reviewer parsing error: {e}")
-        return {"review_log": res.content, "is_approved": False, "audit_count": int(count) + 1, "status_message": "审核解析异常"}
+        return {"review_log": res.content, "is_approved": False, "audit_count": count + 1, "status_message": "审核解析异常"}
 
 def human_node(state: AgentState):
     """
@@ -312,8 +314,8 @@ def human_node(state: AgentState):
     2. 交互入口: 允许人类创作者对 Agent 的提案进行最终核准或提出修改意见。
     """
     print(f"\n[DEBUG] human_node entry. State keys: {list(state.keys())}")
-    proposal = state.get('proposal', '')
-    category = state.get('category', 'general')
+    proposal = str(state.get('proposal') or '')
+    category = str(state.get('category') or 'general')
     print(f"[DEBUG] Entering human_node (category: {category})")
     
     if os.getenv("AGENT_MODE") == "CLI":

@@ -37,7 +37,11 @@ def load_config():
     return {
         "GOOGLE_API_KEY": google_key,
         "GOOGLE_API_KEYS": google_keys,
-        "DEFAULT_MODEL": "gemini-2.5-flash-lite"
+        "DEFAULT_MODEL": "gemini-2.5-flash-lite",
+        "SENTRY_DSN": config.get("SENTRY_DSN") or os.getenv("SENTRY_DSN"),
+        "LANGFUSE_PUBLIC_KEY": config.get("LANGFUSE_PUBLIC_KEY") or os.getenv("LANGFUSE_PUBLIC_KEY"),
+        "LANGFUSE_SECRET_KEY": config.get("LANGFUSE_SECRET_KEY") or os.getenv("LANGFUSE_SECRET_KEY"),
+        "LANGFUSE_HOST": config.get("LANGFUSE_HOST") or os.getenv("LANGFUSE_HOST") or "https://cloud.langfuse.com"
     }
 
 # No global CONFIG object here to force fresh loading if needed, 

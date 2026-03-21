@@ -43,6 +43,9 @@
             <nav class="flex gap-4">
                 <button onclick="switchTab('archive')" class="tab-btn active px-4 py-2 rounded-xl text-sm font-medium transition-all">文献档案库</button>
                 <button onclick="switchTab('agent')" class="tab-btn px-4 py-2 rounded-xl text-sm font-medium transition-all">Agent 工作区</button>
+                <button onclick="switchTab('entity-drafts')" class="tab-btn px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-1">
+                    实体草案 <span id="draft-count-badge" class="hidden bg-red-500 text-[10px] px-1.5 py-0.5 rounded-full">0</span>
+                </button>
                 <button onclick="switchTab('template')" class="tab-btn px-4 py-2 rounded-xl text-sm font-medium transition-all">模板管理</button>
             </nav>
 
@@ -170,6 +173,24 @@
             </div>
         </div>
 
+        <!-- Entity Drafts View -->
+        <div id="entity-drafts-view" class="tab-view hidden space-y-8">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="p-2 rounded-lg bg-orange-500 text-white shadow-lg shadow-orange-500/50"><i data-lucide="shield-check"></i></div>
+                    <h2 class="text-2xl font-bold">待审实体草案 (Entity Sentinel)</h2>
+                </div>
+                <button onclick="fetchDrafts()" class="p-2 text-slate-400 hover:text-white transition-all">
+                    <i data-lucide="refresh-cw" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <div id="drafts-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- Drafts inject here -->
+                <div class="col-span-full text-center py-20 text-slate-500 italic">正在加载草案...</div>
+            </div>
+        </div>
+
             <div id="template-view" class="tab-view hidden space-y-8">
                 <div class="flex items-center gap-3 mb-8">
                     <div class="p-2 rounded-lg bg-indigo-500 text-white shadow-lg shadow-indigo-500/50"><i data-lucide="layout"></i></div>
@@ -245,6 +266,31 @@
                 </div>
             </div>
 
+            <!-- Edit Archive Modal -->
+            <div id="edit-archive-modal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <div class="glass rounded-3xl p-8 w-full max-w-2xl space-y-6">
+                    <h3 class="text-xl font-bold text-white flex items-center gap-2">
+                        <i data-lucide="edit-3" class="w-5 h-5 text-cyan-400"></i> 编辑档案条目
+                    </h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="text-xs text-slate-400 mb-1 block">条目名称</label>
+                            <input type="text" id="edit-archive-name" readonly
+                                class="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-3 text-sm text-slate-400">
+                        </div>
+                        <div>
+                            <label class="text-xs text-slate-400 mb-1 block">原始内容 (支持 JSON 或 Markdown)</label>
+                            <textarea id="edit-archive-content" rows="12" 
+                                class="w-full bg-slate-900/50 border border-slate-700/50 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-cyan-500 transition-all resize-none font-mono"></textarea>
+                        </div>
+                    </div>
+                    <div class="flex gap-4">
+                        <button onclick="closeEditArchiveModal()" class="flex-1 px-6 py-3 rounded-xl border border-slate-700 text-slate-400 hover:bg-slate-800 transition-all">取消</button>
+                        <button id="save-archive-edit-btn" onclick="saveArchiveUpdate()" class="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-cyan-600/20">保存修改</button>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </div>
 
@@ -257,9 +303,13 @@
             
             document.getElementById(`${tabId}-view`).classList.remove('hidden');
             const activeBtn = Array.from(document.querySelectorAll('.tab-btn'))
-                .find(b => b.onclick.toString().includes(tabId));
+                .find(b => b.getAttribute('onclick').includes(tabId));
             if (activeBtn) {
                 activeBtn.classList.add('active', 'bg-cyan-600', 'text-white');
+            }
+
+            if (tabId === 'entity-drafts') {
+                fetchDrafts();
             }
         }
 
@@ -275,7 +325,7 @@
 
         async function fetchLore() {
             try {
-                const res = await fetch('/api/lore');
+                const res = await fetch('/api/lore?t=' + Date.now());
                 allLoreData = await res.json();
                 if(countDocs) countDocs.innerText = allLoreData.length;
                 renderLogs();
@@ -312,18 +362,25 @@
                 if (item.category === 'Outline') color = 'emerald';
                 if (item.category === 'Prose' || item.category === 'Snapshot') color = 'purple';
                 
-                // 使用索引而不是直接传字符串，防止特殊字符导致 JS 崩溃
                 return `
-                    <div onclick="showDetailByIndex(${allLoreData.indexOf(item)})" 
-                        class="p-4 rounded-2xl bg-slate-800/20 border border-slate-800 hover:border-${color}-500/40 hover:bg-slate-800/50 transition-all cursor-pointer group text-left">
-                        <div class="flex justify-between items-center mb-1">
-                            <span class="text-[9px] text-${color}-400 font-bold uppercase tracking-wider bg-${color}-500/10 px-1.5 py-0.5 rounded">${item.category || 'General'}</span>
-                            <span class="text-[9px] text-slate-600 font-mono">${item.timestamp}</span>
+                    <div class="relative group">
+                        <div onclick="showDetailByIndex(${allLoreData.indexOf(item)})" 
+                            class="p-4 rounded-2xl bg-slate-800/20 border border-slate-800 hover:border-${color}-500/40 hover:bg-slate-800/50 transition-all cursor-pointer text-left">
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="text-[9px] text-${color}-400 font-bold uppercase tracking-wider bg-${color}-500/10 px-1.5 py-0.5 rounded">${item.category || 'General'}</span>
+                                <span class="text-[9px] text-slate-600 font-mono">${item.timestamp}</span>
+                            </div>
+                            <div class="text-sm font-semibold group-hover:text-${color}-400 transition-colors line-clamp-2">${item.name || item.query}</div>
                         </div>
-                        <div class="text-sm font-semibold group-hover:text-${color}-400 transition-colors line-clamp-2">${item.name || item.query}</div>
+                        <button onclick="event.stopPropagation(); openEditArchiveModal(${allLoreData.indexOf(item)})" 
+                            title="修改本条目"
+                            class="absolute top-4 right-4 opacity-0 group-hover:opacity-100 p-1.5 bg-slate-700 hover:bg-cyan-600 rounded-lg text-white transition-all">
+                            <i data-lucide="edit-3" class="w-3 h-3"></i>
+                        </button>
                     </div>
                 `;
             }).join('');
+            lucide.createIcons();
         }
 
         function showDetailByIndex(index) {
@@ -337,6 +394,80 @@
             detailContent.innerText = content;
             welcomeView.classList.add('hidden');
             detailView.classList.remove('hidden');
+        }
+
+        let currentEditingIndex = -1;
+
+        function openEditArchiveModal(index) {
+            const item = allLoreData[index];
+            if (!item) return;
+            currentEditingIndex = index;
+            document.getElementById('edit-archive-name').value = item.name || item.query;
+            document.getElementById('edit-archive-content').value = item.content;
+            document.getElementById('edit-archive-modal').classList.remove('hidden');
+        }
+
+        function closeEditArchiveModal() {
+            document.getElementById('edit-archive-modal').classList.add('hidden');
+        }
+
+        async function saveArchiveUpdate() {
+            const item = allLoreData[currentEditingIndex];
+            const newContent = document.getElementById('edit-archive-content').value;
+            const btn = document.getElementById('save-archive-edit-btn');
+            
+            console.log("[DEBUG] saveArchiveUpdate - Data:", {
+                id: item ? item.id : 'undefined',
+                type: item ? item.type : 'undefined',
+                content_len: newContent ? newContent.length : 0
+            });
+
+            if (!item || !item.id || !item.type) {
+                let msg = "保存失败：条目元数据不完整 (Missing ID or Type)";
+                if (item) {
+                    msg += `\n调试信息:\n- ID: ${item.id}\n- Type: ${item.type}\n- Name: ${item.name}`;
+                } else {
+                    msg += "\n错误：找不到对应的条目数据 (Item undefined)";
+                }
+                alert(msg);
+                console.error("[ERROR] Missing metadata for item:", item);
+                return;
+            }
+
+            btn.innerText = "保存中...";
+            btn.disabled = true;
+
+            try {
+                const res = await fetch('/api/archive/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        id: item.id,
+                        type: item.type,
+                        name: item.name || '',
+                        content: newContent
+                    })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    alert("保存成功！");
+                    closeEditArchiveModal();
+                    fetchLore(); 
+                } else {
+                    let errorMsg = data.error || "未知错误";
+                    if (data.received) {
+                        errorMsg += "\n调试信息: " + JSON.stringify(data.received);
+                    }
+                    alert("错误: " + errorMsg);
+                    btn.innerText = "保存修改";
+                    btn.disabled = false;
+                }
+            } catch (err) {
+                alert("保存失败: " + err);
+            } finally {
+                btn.innerText = "保存修改";
+                btn.disabled = false;
+            }
         }
 
 
@@ -641,6 +772,101 @@
         if (agentRunBtn) agentRunBtn.onclick = runAgent;
         if (agentFeedbackBtn) agentFeedbackBtn.onclick = () => submitFeedback(false);
         if (agentApproveBtn) agentApproveBtn.onclick = () => submitFeedback(true);
+
+        // Entity Drafts Logic
+        async function fetchDrafts() {
+            try {
+                const res = await fetch('/api/entity-drafts');
+                const drafts = await res.json();
+                renderDrafts(drafts);
+                updateDraftBadge(drafts.length);
+            } catch (err) {
+                console.error("Fetch drafts error:", err);
+            }
+        }
+
+        function updateDraftBadge(count) {
+            const badge = document.getElementById('draft-count-badge');
+            if (count > 0) {
+                badge.innerText = count;
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
+
+        function renderDrafts(drafts) {
+            const container = document.getElementById('drafts-container');
+            if (drafts.length === 0) {
+                container.innerHTML = '<div class="col-span-full text-center py-20 text-slate-500 italic">暂无待审实体草案。实体哨兵处于警戒状态 🛡️</div>';
+                return;
+            }
+
+            container.innerHTML = drafts.map(draft => `
+                <div class="glass p-6 rounded-3xl border border-orange-500/20 hover:border-orange-500/40 transition-all space-y-4">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <h4 class="text-lg font-bold text-white">${draft.name}</h4>
+                            <span class="text-[10px] text-orange-400 font-bold uppercase tracking-wider bg-orange-500/10 px-2 py-0.5 rounded">${draft.type}</span>
+                        </div>
+                        <span class="text-[9px] text-slate-600 font-mono">${draft.created_at || ''}</span>
+                    </div>
+                    <div class="bg-black/20 p-3 rounded-xl border border-slate-800 text-xs text-slate-400">
+                        <div class="text-[9px] text-slate-500 uppercase mb-1">来源上下文</div>
+                        <div class="line-clamp-3">${draft.source_context}</div>
+                    </div>
+                    <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50">
+                        <div class="text-[9px] text-cyan-400 font-bold uppercase mb-2">自动生成的设定卡 (Draft Card)</div>
+                        <pre class="text-[10px] text-slate-300 font-mono overflow-x-auto scrollbar-hide">${JSON.stringify(draft.entity_card || {}, null, 2)}</pre>
+                    </div>
+                    <div class="flex gap-2 pt-2">
+                        <button onclick="approveDraft('${draft.name}')" class="flex-1 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white py-2 rounded-xl text-xs font-bold transition-all border border-emerald-600/30">批准入库</button>
+                        <button onclick="rejectDraft('${draft.name}')" class="flex-1 bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white py-2 rounded-xl text-xs font-bold transition-all border border-red-600/30">忽略/拒绝</button>
+                    </div>
+                </div>
+            `).join('');
+            lucide.createIcons();
+        }
+
+        async function approveDraft(name) {
+            console.log("Approving draft:", name);
+            if (!confirm(`确定批准并持久化实体 "${name}" 吗？`)) return;
+            try {
+                const res = await fetch('/api/entity-drafts/approve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ entity_name: name })
+                });
+                const data = await res.json();
+                console.log("Approve response:", data);
+                if (data.error) throw new Error(data.error);
+                alert("批准成功！实体已正式入库。");
+                fetchDrafts();
+                fetchLore(); 
+            } catch (err) {
+                console.error("Approve error:", err);
+                alert("操作失败: " + err.message);
+            }
+        }
+
+        async function rejectDraft(name) {
+            if (!confirm(`确定忽略实体 "${name}" 吗？该草案将被删除。`)) return;
+            try {
+                const res = await fetch('/api/entity-drafts/reject', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ entity_name: name })
+                });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                fetchDrafts();
+            } catch (err) {
+                alert("操作失败: " + err.message);
+            }
+        }
+
+        // Initial fetch for badge
+        setTimeout(fetchDrafts, 1000);
 
         // Template Management Logic
         let allTemplates = {};

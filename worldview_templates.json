@@ -27,11 +27,20 @@
       "military_structure": {
         "military_name": "[军队名称]",
         "commander_in_chief": "[最高统帅头衔]",
-        "branches": ["[军种1，如星际舰队]", "[军种2，如地面部队]"],
+        "branches": [
+          "[军种1，如星际舰队]",
+          "[军种2，如地面部队]"
+        ],
         "total_strength": "[总兵力规模]",
-        "signature_weapons": ["[标志性武器1]", "[标志性武器2]"],
+        "signature_weapons": [
+          "[标志性武器1]",
+          "[标志性武器2]"
+        ],
         "doctrine": "[军事学说/作战思想]",
-        "notable_units": ["[精英部队1]", "[精英部队2]"]
+        "notable_units": [
+          "[精英部队1]",
+          "[精英部队2]"
+        ]
       }
     },
     "example": {
@@ -59,11 +68,21 @@
       "military_structure": {
         "military_name": "极光联邦国防军",
         "commander_in_chief": "联邦元帅（由执政官提名、议会批准）",
-        "branches": ["星际舰队", "行星防御军", "特殊作战局"],
+        "branches": [
+          "星际舰队",
+          "行星防御军",
+          "特殊作战局"
+        ],
         "total_strength": "常备军120万，战时可动员至1200万",
-        "signature_weapons": ["极光级无界级战列舰", "零点能导弹"],
+        "signature_weapons": [
+          "极光级无界级战列舰",
+          "零点能导弹"
+        ],
         "doctrine": "防御优先，重视技术优势与信息战；避免全面战争",
-        "notable_units": ["第一快反舰队“曙光之矛”", "特勤第七局“幽灵”"]
+        "notable_units": [
+          "第一快反舰队“曙光之矛”",
+          "特勤第七局“幽灵”"
+        ]
       }
     }
   },
@@ -78,7 +97,10 @@
       "morphology": "[形态与特征，如体型、肢体结构、感官器官等]",
       "racial_traits": "[种族特点，如文化倾向、社会性格、天赋等]",
       "habitat": "[适应生存环境，如高温、真空、高辐射等]",
-      "major_factions": ["[主要势力1]", "[主要势力2]"],
+      "major_factions": [
+        "[主要势力1]",
+        "[主要势力2]"
+      ],
       "entropy_efficiency": "[能耗与熵效率描述]",
       "ecological_niche": "[在星区生态系统中的地位]",
       "evolutionary_history": "[演化历程简述]",
@@ -95,7 +117,10 @@
       "morphology": "无固定形态，可在0.5-15米间自由伸缩；通过电磁场模拟触肢进行物理交互",
       "racial_traits": "极端理性，无个体情感概念；以集群意识决策；对低熵有序结构本能排斥",
       "habitat": "高辐射、高熵废弃星区；无法在低温有序环境中长时间存活",
-      "major_factions": ["熵潮议会", "废墟清扫者联盟"],
+      "major_factions": [
+        "熵潮议会",
+        "废墟清扫者联盟"
+      ],
       "entropy_efficiency": "极高，能够直接摄取高熵废料转化为动能",
       "ecological_niche": "星系清道夫，负责平衡被废弃星区的熵值",
       "evolutionary_history": "诞生于第一次大湮灭后的高能辐射海",
@@ -140,11 +165,17 @@
       "belief": "[信仰核心，如对何种力量/存在的认同]",
       "core_belief": "[核心信条，通常涉及熵或PGA]",
       "doctrines_scriptures": "[教义与经典，如圣典名称、核心教义简述]",
-      "ceremonies": ["[仪式/宗教活动1]", "[仪式/宗教活动2]"],
+      "ceremonies": [
+        "[仪式/宗教活动1]",
+        "[仪式/宗教活动2]"
+      ],
       "rituals": "[主要祭祀/仪式]",
       "moral_code": "[道德规范，如禁忌、行为准则]",
       "organizational_structure": "[组织结构，如教皇制、长老会、分散式等]",
-      "major_factions_and_races": ["[主要势力/信仰种族1]", "[主要势力/信仰种族2]"],
+      "major_factions_and_races": [
+        "[主要势力/信仰种族1]",
+        "[主要势力/信仰种族2]"
+      ],
       "influence_range": "[势力范围]",
       "holy_sites": [
         "[圣地1]"
@@ -156,11 +187,19 @@
       "belief": "信仰宇宙初始的统一能量场，认为万物皆由“第一推动力”的残留能量构成",
       "core_belief": "生命存在的唯一意义是延缓宇宙热寂",
       "doctrines_scriptures": "《熵经》——记载初始能量场分裂的票谱与延缓热寂的修行法门",
-      "ceremonies": ["能量献祭仪式（每星周期）", "熵值净化大典（每星年）", "新星点燃祭（恒星诞生时）"],
+      "ceremonies": [
+        "能量献祭仪式（每星周期）",
+        "熵值净化大典（每星年）",
+        "新星点燃祭（恒星诞生时）"
+      ],
       "rituals": "能量献祭仪式",
       "moral_code": "禁止无意义的能量浪费；每个信徒必须在有生之年降低自身活动的熵增贡献",
       "organizational_structure": "热力学教皇 > 星区大牌牧 > 行星牧师 > 信徒",
-      "major_factions_and_races": ["人类（核心信众）", "熵族（被尊为活体神示）", "地球联邦核心星区"],
+      "major_factions_and_races": [
+        "人类（核心信众）",
+        "熵族（被尊为活体神示）",
+        "地球联邦核心星区"
+      ],
       "influence_range": "银河系核心星区",
       "holy_sites": [
         "太阳神殿"
@@ -262,7 +301,10 @@
       "surface_conditions": "[温度、重力、气候]",
       "dominant_species": "[主要居住种族]",
       "controlling_faction": "[所属势力]",
-      "major_races": ["[主要组成种族1]", "[主要组成种族2]"],
+      "major_races": [
+        "[主要组成种族1]",
+        "[主要组成种族2]"
+      ],
       "political_structure": "[政治结构，如联邦制、帝制、议会制等]",
       "sphere_of_influence": "[势力范围描述]",
       "characteristics": "[星球特点，如地貌、生态、能量场等]",
@@ -285,7 +327,10 @@
       "surface_conditions": "平均25℃，1.05G，常年微雨",
       "dominant_species": "人类",
       "controlling_faction": "地球联邦",
-      "major_races": ["人类", "半机械化人类（赛博格）"],
+      "major_races": [
+        "人类",
+        "半机械化人类（赛博格）"
+      ],
       "political_structure": "联邦议会制，由行星总督与民选议员共同治理",
       "sphere_of_influence": "奥利安星区核心三星系，辐射周边12个殖民星",
       "characteristics": "地表覆盖大面积水晶矿脉，常年笼罩在微光雨雾中，生态系统以光合硅基植物为主",
@@ -482,10 +527,16 @@
       "origin": "[产地/来源]",
       "rarity": "Common | Uncommon | Rare | Legendary",
       "primary_use": "[主要用途]",
-      "secondary_uses": ["[次要用途1]", "[次要用途2]"],
+      "secondary_uses": [
+        "[次要用途1]",
+        "[次要用途2]"
+      ],
       "extraction_method": "[采集/提炼方式]",
       "trade_value": "[贸易价值等级或描述]",
-      "controlling_factions": ["[主要控制势力1]", "[主要控制势力2]"],
+      "controlling_factions": [
+        "[主要控制势力1]",
+        "[主要控制势力2]"
+      ],
       "hazards": "[危险性/处理注意事项]",
       "notes": "[其他说明]"
     },
@@ -495,10 +546,16 @@
       "origin": "超新星遗迹核心区",
       "rarity": "Legendary",
       "primary_use": "超光速引擎的核心燃料",
-      "secondary_uses": ["高阶能量武器充能", "时空校准仪的校准介质"],
+      "secondary_uses": [
+        "高阶能量武器充能",
+        "时空校准仪的校准介质"
+      ],
       "extraction_method": "需在超新星爆发后72小时内由专用采集舰深入辐射核心区提取",
       "trade_value": "极高，1克可购买一艘中型巡洋舰",
-      "controlling_factions": ["极光联邦科学院", "深空矿业公会"],
+      "controlling_factions": [
+        "极光联邦科学院",
+        "深空矿业公会"
+      ],
       "hazards": "未屏蔽接触会导致分子层面的相位不稳定",
       "notes": "PGA协议严格管控交易，需持有A级资源许可证"
     }
@@ -511,7 +568,10 @@
       "classification": "Metallic | Crystalline | Organic | Dark-Matter | Exotic",
       "chemical_composition": "[化学/物理组成]",
       "physical_properties": "[物理特性，如硬度、密度、导电性、光学特性等]",
-      "origin_locations": ["[产地1]", "[产地2]"],
+      "origin_locations": [
+        "[产地1]",
+        "[产地2]"
+      ],
       "formation_conditions": "[形成条件]",
       "primary_application": "[主要应用领域]",
       "refining_process": "[冶炼/加工方式]",
@@ -524,7 +584,10 @@
       "classification": "Dark-Matter",
       "chemical_composition": "暗物质凝聚态，含微量反中微子",
       "physical_properties": "硬度超金刚石300倍，可吸收99.9%电磁辐射，常温下呈半透明黑紫色",
-      "origin_locations": ["克洛斯星云深处", "废弃戴森球残片内"],
+      "origin_locations": [
+        "克洛斯星云深处",
+        "废弃戴森球残片内"
+      ],
       "formation_conditions": "需在极端引力坍缩与暗能量交汇处自然凝结，周期约十万年",
       "primary_application": "隐形舰体涂层、能量屏蔽罩核心材料",
       "refining_process": "在零重力环境下以反物质射流切割，无法熔炼",
@@ -543,9 +606,14 @@
       "output_capacity": "[能量输出规模]",
       "efficiency": "[转化效率]",
       "storage_method": "[存储方式]",
-      "applications": ["[应用领域1]", "[应用领域2]"],
+      "applications": [
+        "[应用领域1]",
+        "[应用领域2]"
+      ],
       "risks": "[风险与副作用]",
-      "controlling_factions": ["[主要掌控势力1]"],
+      "controlling_factions": [
+        "[主要掌控势力1]"
+      ],
       "pga_regulation": "[PGA协议对该能源的管控]",
       "notes": "[其他说明]"
     },
@@ -556,9 +624,15 @@
       "output_capacity": "理论上无限，实际受提取设备限制，单台约10^18焦耳/秒",
       "efficiency": "92%（当前技术），理论极限99.7%",
       "storage_method": "零点能集束器，利用超导量子阱稳定存储",
-      "applications": ["星际航行主动力", "行星级防御系统", "大规模殖民地供能"],
+      "applications": [
+        "星际航行主动力",
+        "行星级防御系统",
+        "大规模殖民地供能"
+      ],
       "risks": "提取失控可导致局部真空坍缩，制造微型黑洞",
-      "controlling_factions": ["极光联邦"],
+      "controlling_factions": [
+        "极光联邦"
+      ],
       "pga_regulation": "PGA-07协议限制单次提取功率上限，禁止在人口密集星区建设大型提取站",
       "notes": "第一次星界战争的导火索之一"
     }
@@ -570,28 +644,43 @@
       "name": "[职业名称]",
       "category": "Military | Scientific | Commercial | Artisan | Criminal | Religious | Administrative",
       "description": "[职业描述]",
-      "required_skills": ["[技能要求1]", "[技能要求2]"],
+      "required_skills": [
+        "[技能要求1]",
+        "[技能要求2]"
+      ],
       "required_species": "[适用种族，如无限制则填'通用']",
       "typical_employer": "[典型雇主/所属机构]",
       "social_status": "Low | Middle | High | Elite",
       "income_level": "Low | Middle | High | Exceptional",
       "risks": "[职业风险]",
       "career_path": "[晋升路线]",
-      "equipment": ["[标配装备1]", "[标配装备2]"],
+      "equipment": [
+        "[标配装备1]",
+        "[标配装备2]"
+      ],
       "notes": "[其他说明]"
     },
     "example": {
       "name": "星际拾荒者",
       "category": "Commercial",
       "description": "在废弃星区、战场遗迹与太空垃圾带中搜寻可回收资源与古物的独立从业者",
-      "required_skills": ["EVA太空行走", "基础机械维修", "辐射环境生存", "古物鉴定"],
+      "required_skills": [
+        "EVA太空行走",
+        "基础机械维修",
+        "辐射环境生存",
+        "古物鉴定"
+      ],
       "required_species": "通用（碳基生物需穿戴防辐射套装）",
       "typical_employer": "自由职业 / 深空矿业公会 / 黑市收藏家",
       "social_status": "Low",
       "income_level": "Middle（偶尔捡到稀有物可暴富）",
       "risks": "辐射暴露、太空寄生虫、海盗袭击、古代武器误触发",
       "career_path": "学徒拾荒者 > 持证拾荒者 > 星区承包商 > 拾荒公会理事",
-      "equipment": ["多频谱扫描仪", "微型切割激光", "折叠式货舱扩展模块"],
+      "equipment": [
+        "多频谱扫描仪",
+        "微型切割激光",
+        "折叠式货舱扩展模块"
+      ],
       "notes": "部分星区要求持有PGA颁发的废墟探索许可证"
     }
   }

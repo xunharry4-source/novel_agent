@@ -1,4 +1,6 @@
-# Technical Design Document: Worldview & Novel Agent (Multi-Agent Architecture)
+# Technical Design Document: Worldview & Novel Agent
+
+[English Version](./technical_design.md) | [中文版](./technical_design_ZH.md)
 
 ## 1. Role: Workflow Architect
 
@@ -84,14 +86,30 @@ The `app_api.py` acts as a router, selecting between `worldview_app` and `outlin
 
 ---
 
-## 7. Project Files Mapping
+## 8. Observability & Monitoring (观测与监控)
+
+To ensure the stability and traceability of the Multi-Agent system, a comprehensive observability stack is integrated:
+
+1.  **Sentry (Error Tracking)**: Captures backend exceptions and performance data in real-time.
+2.  **LangFuse (LLM Tracing)**: Traces every step of the LangGraph execution, providing a detailed view of prompt history, completion tokens, and transition latency.
+3.  **Prometheus (Metrics)**: Exposes a `/metrics` endpoint to collect time-series data, including HTTP latencies and custom business metrics.
+4.  **Grafana (Visualization)**: Provides a centralized dashboard for visualizing system health and LLM usage patterns.
+
+### Custom Metrics
+- **`llm_token_usage_total`**: A counter that tracks token consumption across different agents (worldview, outline, router) and models.
+
+---
+
+## 9. Project Files Mapping
 
 | Component | Responsibility | Relevant Files |
 | :--- | :--- | :--- |
 | **Logic Engine (Worldview)** | Graph execution & state flow | `worldview_agent_langgraph.py` |
 | **Logic Engine (Outline)** | Novel outline generation graph | `novel_outline_agent_langgraph.py` |
-| **API Router** | Multi-agent request handling | `app_api.py` |
+| **API Router & Metrics** | Multi-agent request handling & Prometheus | `app_api.py` |
 | **Web Dashboard** | Multi-agent UI & JSON Rendering | `dashboard.html` |
+| **Observability Config** | Sentry, LangFuse, Prometheus infra | `observability/`, `config_utils.py` |
 | **Architectural Rules**| 0-4 Architecture Definitions | `info.md`, `novel_outline_info.md` |
 | **Knowledge Base** | Full world setting & lore | `worldview_db.json` |
 | **Vector Index** | ChromaDB persistence | `./chroma_db/` |
+| **Agent Skills** | Context-level guidelines | `.gemini/skills/` |

@@ -1,0 +1,46 @@
+[
+  {
+    "id": "mock_outline_001",
+    "timestamp": "2026-03-19T23:30:00",
+    "mode": "book",
+    "outline": {
+      "meta_info": {
+        "title": "星际协议：深空遗迹",
+        "genre": [
+          "Sci-Fi",
+          "Mystery"
+        ],
+        "tone": "Suspenseful",
+        "writing_style": "Hard Sci-Fi, Logic-Driven"
+      },
+      "plot_beats": {
+        "act_1": "主角在废弃空间站发现了一枚未知的量子存储卡。",
+        "midpoint": "卡片内容揭示了地球大灭绝的真相并非自然灾害，而是人为清洗。",
+        "climax": "主角在木星前哨站与清洗者代理人进行最后的逻辑博弈。",
+        "resolution": "真相被广播至全星系，主角在爆炸中失踪。"
+      },
+      "chapter_list": [
+        {
+          "chapter_num": 1,
+          "title": "幽灵信号",
+          "summary": "空间站遭遇不明干扰。",
+          "focus": "建立悬疑感"
+        },
+        {
+          "chapter_num": 2,
+          "title": "禁忌档案",
+          "summary": "解密存储卡。",
+          "focus": "信息揭露"
+        },
+        {
+          "chapter_num": 3,
+          "title": "深空追影",
+          "summary": "遭遇佣兵追杀。",
+          "focus": "动作场面与生存压力",
+          "proposal": " - (Verified by AI)"
+        }
+      ]
+    },
+    "proposal": "TEST CONTENT FOR FULL FLOW VERIFICATION - 1774003970.872768"
+  }
+]

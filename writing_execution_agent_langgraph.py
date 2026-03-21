@@ -25,7 +25,13 @@ from lore_utils import (
     get_prohibited_rules, 
     get_worldview_context_by_category, 
     get_unified_context,
-    parse_json_safely
+    get_grounded_context,
+    format_grounded_context_for_prompt,
+    parse_json_safely,
+    get_entity_registry, 
+    format_entity_registry_for_prompt,
+    register_draft_entity, 
+    get_category_template
 )
 
 # ==========================================
@@ -53,6 +59,7 @@ class WritingState(TypedDict):
     scene_list: List[dict]      # 拆解后的场次清单 [{'title': '...', 'description': '...'}]
     active_scene_index: int     # 当前正在写的场次索引
     context_data: str           # 从 ChromaDB/MongoDB 检索出的背景知识
+    grounding_sources: List[dict] # 绑定的源素材索引
     
     # 输出数据
     draft_content: str          # 生成的初稿正文
@@ -108,33 +115,69 @@ def plan_scenes_func(state: WritingState):
     }
 
 def load_context_func(state: WritingState):
-    """语境加载节点"""
+    """语境加载节点 - 融合分布式 SKILL"""
     print(f"\n[DEBUG] load_context_func entry. State keys: {list(state.keys())}")
-    idx = state.get('active_scene_index', 0)
-    scene_list = state.get('scene_list', [])
     
-    if not scene_list or idx >= len(scene_list):
+    # 显式类型防护以修复 Pyre2 报警
+    val = state.get('active_scene_index')
+    idx = int(val) if isinstance(val, (int, str)) else 0
+    
+    scene_list = state.get('scene_list')
+    if not isinstance(scene_list, list):
+        scene_list = []
+    
+    if idx >= len(scene_list):
         return {"status_message": "语境加载异常：索引越界"}
         
     scene = scene_list[idx]
-    query = f"{scene.get('title', '')} {scene.get('description', '')}"
-    rag_context = get_unified_context(query)
+    if not isinstance(scene, dict):
+        return {"status_message": "语境加载异常：场次格式错误"}
+        
+    query = f"{str(scene.get('title') or '')} {str(scene.get('description') or '')}"
     
+    # 1. 基础 RAG 检索 (带索引的 Grounding 模式)
+    sources = get_grounded_context(query)
+    grounded_context_str = format_grounded_context_for_prompt(sources)
+    
+    # 2. 加载分布式 SKILL (高优控制)
+    skills_context = ""
+    try:
+        # 加载剧情锚点 (宪法)
+        with open('.gemini/skills/lore/ANCHORS.md', 'r', encoding='utf-8') as f:
+            skills_context += f"\n【剧情锚点 (不可违背)】\n{f.read()}\n"
+        # 加载活跃窗口 (施工图)
+        with open('.gemini/skills/catalog/ACTIVE_WINDOW.md', 'r', encoding='utf-8') as f:
+            skills_context += f"\n【活跃章节窗口 (当前目标)】\n{f.read()}\n"
+    except Exception as e:
+        print(f"[WARNING] Loading skills failed: {e}")
+        skills_context = "\n[警告] 未能加载分布式 SKILL 约束，仅依靠 RAG 语境。\n"
+
+    # 3. 加载实体注册表 (A 层约束)
+    entity_registry = get_entity_registry()
+    entity_constraint = format_entity_registry_for_prompt(entity_registry)
+
     return {
-        "context_data": rag_context,
-        "status_message": f"正在处理第 {idx+1} 场：{scene.get('title', '')}。已加载背景语境。"
+        "context_data": f"{skills_context}\n{entity_constraint}\n{grounded_context_str}",
+        "grounding_sources": sources,
+        "status_message": f"正在处理第 {idx+1} 场：{scene.get('title', '')}。已加载 {len(sources)} 条素材锚定。"
     }
 
 def write_draft_func(state: WritingState):
     """正文生成节点"""
     print(f"\n[DEBUG] write_draft_func entry. State keys: {list(state.keys())}")
-    idx = state.get('active_scene_index', 0)
-    scene_list = state.get('scene_list', [])
-    if not scene_list or idx >= len(scene_list):
+    
+    val = state.get('active_scene_index')
+    idx = int(val) if isinstance(val, (int, str)) else 0
+    
+    scene_list = state.get('scene_list')
+    if not isinstance(scene_list, list) or idx >= len(scene_list):
         return {"status_message": "正文生成失败：索引越界"}
         
     scene = scene_list[idx]
-    user_feedback = state.get('user_feedback', '')
+    if not isinstance(scene, dict):
+        return {"status_message": "正文生成失败：场次格式错误"}
+        
+    user_feedback = str(state.get('user_feedback') or '')
     feedback_section = ""
     if user_feedback:
         feedback_section = f"\n【！！！当前核心修改需求！！！】\n要求：{user_feedback}\n"
@@ -144,10 +187,16 @@ def write_draft_func(state: WritingState):
 {feedback_section}
 
 【大纲】{state.get('outline_content', '')}
-【场次计划】{scene.get('title', '')}: {scene.get('description', '')}
+【场次计划】{str(scene.get('title') or '')}: {str(scene.get('description') or '')}
 【语境】{state.get('context_data', '')}
 
-要求：文采斐然，符合 PGA 世界观，落实修改建议。直接输出正文。
+要求：文采斐然，落实修改建议。
+直接输出正文。
+
+【重要：素材锚定规则】
+1. 当你描写涉及世界观背景、科技原理、历史事件或硬性设定时，必须在对应的描述末尾标注来源索引编号，例如：[S1], [S3]。
+2. 不要为了标注而标注，只有在使用了提供的源素材（References）中的特定事实时才需要标注。
+3. 文学性的描写、抒情、对话（非设定解释类）无需标注。
 """
     res = get_llm().invoke(prompt)
     return {
@@ -161,34 +210,113 @@ def audit_logic_func(state: WritingState):
     print(f"\n[DEBUG] audit_logic_func entry. State keys: {list(state.keys())}")
     prohibited_items = get_prohibited_rules()
     
-    idx = state.get('active_scene_index', 0)
-    scene_list = state.get('scene_list', [])
-    if not scene_list or idx >= len(scene_list):
+    val = state.get('active_scene_index')
+    idx = int(val) if isinstance(val, (int, str)) else 0
+    
+    scene_list = state.get('scene_list')
+    if not isinstance(scene_list, list) or idx >= len(scene_list):
         return {"is_audit_passed": False, "status_message": "审计信息缺失"}
         
     scene = scene_list[idx]
-    worldview_rules = get_worldview_context_by_category(f"{scene.get('title', '')} {scene.get('description', '')}")
+    if not isinstance(scene, dict):
+        return {"is_audit_passed": False, "status_message": "审计信息格式错误"}
+        
+    worldview_rules = get_worldview_context_by_category(f"{str(scene.get('title') or '')} {str(scene.get('description') or '')}")
     
     char_status = state.get("char_status_summary", "无")
     
-    prompt = f"""小说逻辑审计员。检查冲突。
+    prompt = f"""小说逻辑与素材锚定审计员。检查冲突与引用准确性。
 禁令: {prohibited_items}
+
+【提供的源素材】
+{format_grounded_context_for_prompt(state.get('grounding_sources', []))}
+
 官方规则: {worldview_rules}
 上场快照: {char_status}
 
 待审计正文:
 {state.get('draft_content', '')}
 
-输出 JSON: {{"is_consistent": true/false, "audit_log": "..."}}
+【审计任务】
+1. 检查正文是否违背了禁令或官方规则。
+2. 核查正文中的 [SX] 引用是否与素材内容匹配。
+3. 识别出正文中提及了特定设定但未标注引用、或标注了引用但素材中找不到对应事实的现象。
+
+输出 JSON: {"is_consistent": true/false, "audit_log": "...", "grounding_score": 0-100}
 """
     res = get_llm(json_mode=True).invoke(prompt)
     data = parse_json_safely(res.content)
     is_ok = data.get("is_consistent", False) if data else False
     
+    # B 层：在审计同时检测新实体 (增强型：带模板生成)
+    entity_warning = ""
+    try:
+        registry = get_entity_registry()
+        known_names = set()
+        for names_list in registry.values():
+            known_names.update(names_list)
+        
+        draft_content = str(state.get('draft_content') or '')
+        extract_prompt = f"""从以下小说正文中提取所有专有名词实体（人物、势力、种族、科技、地点）。
+只输出 JSON 数组：[{{"name": "实体名", "type": "character/faction/race/tech/location/other"}}]
+
+正文：
+{draft_content[:2000]}
+"""
+        ent_res = get_llm(json_mode=True).invoke(extract_prompt)
+        extracted = parse_json_safely(ent_res.content)
+        
+        if isinstance(extracted, list):
+            new_count = 0
+            type_to_category = {
+                "character": "general", "faction": "faction", "organization": "organization",
+                "race": "race", "tech": "mechanism_tech", "mechanism": "mechanism_tech",
+                "location": "geography", "planet": "planet", "weapon": "weapon",
+                "creature": "creature", "religion": "religion", "history": "history", "crisis": "crisis"
+            }
+            
+            for ent in extracted:
+                if not isinstance(ent, dict): continue
+                name = str(ent.get('name') or '')
+                etype = str(ent.get('type') or 'other')
+                if name and name not in known_names:
+                    # 增强逻辑：生成模板化设定卡
+                    category = type_to_category.get(etype, "general")
+                    template_data = get_category_template(category)
+                    template_str = json.dumps(template_data.get("template", {}), ensure_ascii=False) if template_data else "{}"
+                    
+                    card_prompt = f"""你是一个世界观架构师。请根据以下正文片段，为新发现的实体【{name}】（分类：{category}）生成一份结构化的设定卡。
+必须遵循以下模板格式，并且必须符合 PGA 世界观规则。
+
+【实体名】: {name}
+【分类】: {category}
+【参考模板】: {template_str}
+
+【正文片段】:
+{draft_content[:1500]}
+
+TASK: 请输出该实体的完整 JSON 设定，必须匹配模板字段。
+"""
+                    card_res = get_llm(json_mode=True).invoke(card_prompt)
+                    entity_card = parse_json_safely(card_res.content) or {"name": name, "description": "自动提取"}
+                    
+                    register_draft_entity(
+                        entity_name=name, 
+                        entity_type=category, 
+                        source_context="正文中首次出现", 
+                        source_agent="writing",
+                        entity_card=entity_card
+                    )
+                    new_count += 1
+            if new_count > 0:
+                entity_warning = f" 同时发现 {new_count} 个未注册实体并已按模板生成设定卡，登记待审。"
+    except Exception as e:
+        print(f"[Entity Sentinel] 正文实体检测异常: {e}")
+    
     return {
         "is_audit_passed": is_ok,
         "audit_feedback": data.get("audit_log", "解析异常") if data else "解析异常",
-        "status_message": "审计通过。" if is_ok else "审计发现逻辑冲突。"
+        "status_message": ("审计通过。" if is_ok else "审计发现逻辑冲突。") + entity_warning
     }
 
 def human_review_node(state: WritingState):
@@ -205,12 +333,18 @@ def human_review_node(state: WritingState):
 def prose_saver_func(state: WritingState):
     """存档节点"""
     print(f"\n[DEBUG] prose_saver_func entry. State keys: {list(state.keys())}")
-    idx = state.get('active_scene_index', 0)
-    scene_list = state.get('scene_list', [])
-    if not scene_list or idx >= len(scene_list):
+    
+    val = state.get('active_scene_index')
+    idx = int(val) if isinstance(val, (int, str)) else 0
+    
+    scene_list = state.get('scene_list')
+    if not isinstance(scene_list, list) or idx >= len(scene_list):
         return {"status_message": "存档越界"}
         
     scene = scene_list[idx]
+    if not isinstance(scene, dict):
+        return {"status_message": "存档场次格式错误"}
+
     record = {
         "id": f"prose_{state.get('outline_id', 'unknown')}_{idx}",
         "outline_id": state.get('outline_id', 'unknown'),
@@ -230,7 +364,9 @@ def prose_saver_func(state: WritingState):
 def snapshot_node_func(state: WritingState):
     """快照生成节点"""
     print(f"\n[DEBUG] snapshot_node_func entry. State keys: {list(state.keys())}")
-    idx = state.get('active_scene_index', 0) - 1 
+    
+    val = state.get('active_scene_index')
+    idx = (int(val) if isinstance(val, (int, str)) else 0) - 1 
     
     prompt = f"""提取快照及视觉描述。JSON。
 正文: {state.get('draft_content', '')}
@@ -274,7 +410,7 @@ def route_after_audit(state: WritingState):
 workflow.add_conditional_edges("audit_logic", route_after_audit, {"human_review": "human_review", "write_draft": "write_draft"})
 
 def route_after_human(state: WritingState):
-    fb = (state.get("user_feedback") or "").strip()
+    fb = str(state.get("user_feedback") or "").strip()
     if fb == "批准": return "prose_saver"
     if fb == "终止": return END
     if fb: return "write_draft" 
@@ -285,7 +421,11 @@ workflow.add_conditional_edges("human_review", route_after_human, {"prose_saver"
 workflow.add_edge("prose_saver", "snapshot_node")
 
 def route_next_scene(state: WritingState):
-    if state.get('active_scene_index', 0) < len(state.get('scene_list', [])): return "load_context"
+    _idx_val = state.get('active_scene_index')
+    idx = int(_idx_val) if isinstance(_idx_val, (int, str)) else 0
+    scene_list = state.get('scene_list')
+    total = len(scene_list) if isinstance(scene_list, list) else 0
+    if idx < total: return "load_context"
     return END
 
 workflow.add_conditional_edges("snapshot_node", route_next_scene, {"load_context": "load_context", END: END})

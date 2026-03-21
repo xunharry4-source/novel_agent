@@ -21,6 +21,7 @@ from chromadb.config import Settings
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_chroma import Chroma
 from config_utils import load_config
+from langfuse.callback import CallbackHandler
 
 # ==========================================
 # API Key Manager (Global Singleton for the module)
@@ -50,7 +51,40 @@ class APIKeyManager:
 
 _key_manager = APIKeyManager()
 
-# --- Client Initialization Helpers ---
+# --- LangFuse Callback Helper ---
+def get_langfuse_callback():
+    """Returns a LangFuse CallbackHandler if keys are configured."""
+    config = load_config()
+    pk = config.get("LANGFUSE_PUBLIC_KEY")
+    sk = config.get("LANGFUSE_SECRET_KEY")
+    host = config.get("LANGFUSE_HOST")
+    
+    if pk and sk:
+        return CallbackHandler(
+            public_key=pk, 
+            secret_key=sk, 
+            host=host
+        )
+    return None
+
+# --- Prometheus Global Counter (Imported from app_api if needed) ---
+# We use a lazy reference to avoids circular imports
+_token_counter = None
+
+def report_token_usage(model: str, prompt_tokens: int, completion_tokens: int, agent_name: str = "unknown"):
+    """Reports token usage to Prometheus."""
+    global _token_counter
+    if _token_counter is None:
+        try:
+            from app_api import TOKEN_USAGE_COUNTER
+            _token_counter = TOKEN_USAGE_COUNTER
+        except ImportError:
+            return
+            
+    if _token_counter:
+        _token_counter.labels(model=model, token_type='prompt', agent=agent_name).inc(prompt_tokens)
+        _token_counter.labels(model=model, token_type='completion', agent=agent_name).inc(completion_tokens)
+        print(f"[METRICS] Reported {prompt_tokens+completion_tokens} tokens for {agent_name} ({model})")
 
 def get_llm(json_mode=False):
     key = _key_manager.get_key()
@@ -389,3 +423,318 @@ def get_unified_context(query, retry_on_429=True):
         unique_blocks = list(dict.fromkeys(context_blocks))
         return "\n\n".join(unique_blocks[:8])
     return ""
+
+def get_grounded_context(query) -> List[Dict[str, str]]:
+    """
+    获取带索引的素材块，用于 NotebookLM 模式的强制锚定。
+    返回: [{"id": "S1", "title": "...", "content": "..."}, ...]
+    """
+    sources = []
+    
+    # 1. MongoDB 权威设定
+    db = get_mongodb_db()
+    if db is not None:
+        try:
+            cursor = db["lore"].find({"name": {"$regex": query, "$options": "i"}}).limit(3)
+            for doc in cursor:
+                sources.append({
+                    "id": f"S{len(sources)+1}",
+                    "title": f"权威设定: {doc['name']}",
+                    "content": doc['content']
+                })
+        except Exception:
+            pass
+
+    # 2. ChromaDB 背景资料
+    try:
+        vector_store = get_vector_store()
+        if vector_store:
+            results = vector_store.similarity_search(query, k=5)
+            for res in results:
+                sources.append({
+                    "id": f"S{len(sources)+1}",
+                    "title": f"背景资料: {res.metadata.get('name', '未命名')}",
+                    "content": res.page_content
+                })
+    except Exception:
+        pass
+        
+    return sources[:10]
+
+def format_grounded_context_for_prompt(sources: List[Dict[str, str]]) -> str:
+    """将素材块格式化为 Prompt 引用段落"""
+    if not sources:
+        return "【无相关源素材】"
+    
+    formatted = "### 可用源素材 (Sources):\n"
+    for s in sources:
+        formatted += f"[{s['id']}] {s['title']}\n{s['content']}\n\n"
+    return formatted
+
+def get_latest_book_outline():
+    """获取最近一次保存的全局大纲"""
+    if not os.path.exists('outlines_db.json'):
+        return None
+    try:
+        with open('outlines_db.json', 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            if not lines: return None
+            # 返回最后一行（最新记录）
+            return json.loads(lines[-1].strip())
+    except Exception as e:
+        print(f"[lore_utils] Error reading outlines_db.json: {e}")
+        return None
+
+def get_outline_by_id(outline_id):
+    """根据 ID 获取特定大纲内容"""
+    if not os.path.exists('outlines_db.json'):
+        return None
+    try:
+        with open('outlines_db.json', 'r', encoding='utf-8') as f:
+            for line in f:
+                data = json.loads(line.strip())
+                if str(data.get('id')) == str(outline_id):
+                    return data
+    except Exception as e:
+        print(f"[lore_utils] Error searching outline {outline_id}: {e}")
+    return None
+
+
+# ==========================================
+# Entity Sentinel (实体哨兵) Utilities
+# ==========================================
+
+def get_entity_registry() -> Dict[str, List[str]]:
+    """
+    从 worldview_db.json 中扫描所有已注册实体的名称，按分类分组。
+    返回格式: {"race": ["熵族", "奥族", ...], "faction": ["联邦", ...], ...}
+    用于 A 层 - 在 Prompt 中注入已知实体清单，约束 LLM 优先复用。
+    """
+    registry: Dict[str, List[str]] = {}
+    
+    # 从本地 JSON 扫描
+    if os.path.exists("worldview_db.json"):
+        try:
+            with open("worldview_db.json", "r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    data = json.loads(line)
+                    cat = data.get("category", "general")
+                    name = data.get("name", "")
+                    if name:
+                        if cat not in registry:
+                            registry[cat] = []
+                        if name not in registry[cat]:
+                            registry[cat].append(name)
+        except Exception as e:
+            print(f"[Entity Sentinel] Error scanning worldview_db.json: {e}")
+    
+    # 从 MongoDB 补充
+    db = get_mongodb_db()
+    if db is not None:
+        try:
+            cursor = db["lore"].find({}, {"name": 1, "category": 1})
+            for doc in cursor:
+                cat = doc.get("category", "general")
+                name = doc.get("name", "")
+                if name:
+                    if cat not in registry:
+                        registry[cat] = []
+                    if name not in registry[cat]:
+                        registry[cat].append(name)
+        except Exception:
+            pass
+    
+    return registry
+
+
+def format_entity_registry_for_prompt(registry: Dict[str, List[str]]) -> str:
+    """
+    将实体注册表格式化为 Prompt 可注入的文本块。
+    """
+    if not registry:
+        return "【已注册实体清单】暂无已注册实体。你可以自由创建，但请在输出中标注 new_entities。"
+    
+    lines = ["【已注册实体清单 — 优先使用以下实体，如需创建新实体请在 JSON 中增加 \"new_entities\": [{\"name\": \"...\", \"type\": \"...\", \"reason\": \"...\"}] 数组】"]
+    for cat, names in registry.items():
+        cat_label = {
+            "race": "种族", "faction": "势力", "geography": "地理",
+            "mechanism_tech": "科技/机制", "history": "历史事件",
+            "planet": "星球", "creature": "生物", "weapon": "武器装备",
+            "organization": "组织", "religion": "宗教", "crisis": "危机事件",
+        }.get(cat, cat)
+        lines.append(f"  - {cat_label}: {', '.join(names)}")
+    
+    return "\n".join(lines)
+
+
+def register_draft_entity(entity_name: str, entity_type: str, source_context: str, 
+                          source_agent: str = "unknown", entity_card: Optional[Dict] = None) -> bool:
+    """
+    将新发现的实体写入"待审区" entity_drafts_db.json。
+    C 层 - 不直接入正式库，等待用户审批。
+    
+    Args:
+        entity_name: 实体名称 (如 "凯恩")
+        entity_type: 实体分类 (如 "character", "faction", "tech")
+        source_context: 实体出现的上下文描述
+        source_agent: 来源 Agent (如 "outline", "writing")
+        entity_card: 完整的实体设定卡 (基于分类模板生成)
+    """
+    import datetime as _dt
+    record = {
+        "name": entity_name,
+        "type": entity_type,
+        "source_context": source_context,
+        "source_agent": source_agent,
+        "entity_card": entity_card or {},
+        "status": "pending",  # pending / approved / rejected
+        "created_at": _dt.datetime.now().isoformat()
+    }
+    try:
+        with open("entity_drafts_db.json", "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        print(f"[Entity Sentinel] 新实体草案已登记: {entity_name} ({entity_type})")
+        return True
+    except Exception as e:
+        print(f"[Entity Sentinel] 登记失败: {e}")
+        return False
+
+
+
+def get_draft_entities(status_filter: Optional[str] = "pending") -> List[Dict]:
+    """获取待审实体列表。C 层 API 使用。"""
+    drafts = []
+    if not os.path.exists("entity_drafts_db.json"):
+        return drafts
+    try:
+        with open("entity_drafts_db.json", "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                data = json.loads(line)
+                if status_filter is None or data.get("status") == status_filter:
+                    drafts.append(data)
+    except Exception as e:
+        print(f"[Entity Sentinel] 读取草案库失败: {e}")
+    return drafts
+
+
+def approve_draft_entity(entity_name: str) -> bool:
+    """
+    批准待审实体 → 写入正式世界观库 (worldview_db.json)。
+    C 层 - 用户在仪表盘上点"批准"后触发。
+    如果草案包含完整的 entity_card（基于分类模板生成），则将其完整写入。
+    """
+    if not os.path.exists("entity_drafts_db.json"):
+        return False
+    
+    all_drafts = []
+    target = None
+    try:
+        with open("entity_drafts_db.json", "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                data = json.loads(line)
+                if data.get("name") == entity_name and data.get("status") == "pending":
+                    data["status"] = "approved"
+                    target = data
+                all_drafts.append(data)
+    except Exception:
+        return False
+    
+    if not target:
+        return False
+    
+    # 更新草案库状态
+    with open("entity_drafts_db.json", "w", encoding="utf-8") as f:
+        for d in all_drafts:
+            f.write(json.dumps(d, ensure_ascii=False) + "\n")
+    
+    # 写入正式库 — 包含完整的实体设定卡
+    entity_card = target.get("entity_card", {})
+    if entity_card:
+        content = json.dumps(entity_card, ensure_ascii=False, indent=2)
+    else:
+        content = f"[自动注册] {target.get('source_context', '')}"
+    
+    canon_record = {
+        "name": target["name"],
+        "category": target.get("type", "general"),
+        "content": content,
+        "path": f"自动注册/{target.get('type', 'general')}/{target['name']}"
+    }
+    with open("worldview_db.json", "a", encoding="utf-8") as f:
+        f.write(json.dumps(canon_record, ensure_ascii=False) + "\n")
+    
+def sync_archive_to_all_stores(item_id: str, item_type: str, content: str, name: str = None) -> bool:
+    """
+    将修改后的条目同步到 MongoDB, ChromaDB 和技能系统 (SKILL)。
+    """
+    print(f"[lore_utils] Syncing {item_type} ID: {item_id} to all stores...")
+    
+    # 1. MongoDB Sync (For Worldview)
+    if item_type == 'worldview':
+        db = get_mongodb_db()
+        if db is not None:
+            try:
+                # 统一更新到 lore 集合
+                db["lore"].update_one(
+                    {"doc_id": item_id},
+                    {"$set": {"content": content, "name": name, "timestamp": datetime.now().isoformat()}},
+                    upsert=True
+                )
+                print(f"[lore_utils] MongoDB sync success for {item_id}")
+            except Exception as e:
+                print(f"[lore_utils] MongoDB sync error: {e}")
+
+    # 2. ChromaDB Sync (Vector Re-indexing)
+    try:
+        vector_store = get_vector_store()
+        if vector_store:
+            # 在 ChromaDB 中，我们通常使用 doc_id 作为 metadata 的一部分
+            # 这里采取：先删除旧的，再插入新的（最简单的同步方式）
+            # 注意：这需要 item_id 在 ChromaDB 中是唯一的标识符
+            
+            # 由于 LangChain Chroma 封装的原因，直接按 metadata 删除比较慢
+            # 如果我们在存储时将 doc_id 设置为 Chroma ID，则可以直接 update
+            
+            # 获取 embedding 函数
+            emb = vector_store.embeddings
+            
+            # 使用原生 client 进行操作以获得更好控制
+            client = chromadb.PersistentClient(path="./chroma_db")
+            collection = client.get_collection("pga_lore")
+            
+            # 尝试删除旧记录 (如果存在)
+            # 注意：item_id 必须与存储时的 ID 一致
+            try:
+                collection.delete(ids=[item_id])
+            except:
+                pass
+            
+            # 生成新 embedding 并插入
+            collection.add(
+                ids=[item_id],
+                documents=[content],
+                metadatas=[{"name": name or "未命名", "type": item_type, "doc_id": item_id, "timestamp": datetime.now().isoformat()}]
+            )
+            print(f"[lore_utils] ChromaDB sync success for {item_id}")
+    except Exception as e:
+        print(f"[lore_utils] ChromaDB sync error: {e}")
+
+    # 3. SKILL Sync (For Outlines)
+    if item_type == 'outline':
+        try:
+            from lore_skill_converter import generate_modular_skills
+            generate_modular_skills()
+            print(f"[lore_utils] SKILL (ANCHORS) sync success for {item_id}")
+        except Exception as e:
+            print(f"[lore_utils] SKILL sync error: {e}")
+            
+    return True
+
+from datetime import datetime
+import datetime as _dt

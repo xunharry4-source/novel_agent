@@ -1,0 +1,1 @@
+{"name": "星渊先驱者 (Star-Void Pioneer)", "type": "general", "source_context": "测试 UI 功能的真实草案", "source_agent": "manual_test", "entity_card": {"name": "星渊先驱者", "description": "第一批进入星渊深处的探索者，身上覆盖着晶体化的散热片。", "background": "曾是极光联邦的舰长，后来由于热寂辐射产生了生物变异。", "traits": ["高能抗性", "晶体外观"]}, "status": "pending", "created_at": "2026-03-20T00:12:05.621525"}
