@@ -138,3 +138,9 @@ python app_api.py
 ## ⚙️ 核心开发原则
 
 - **双库事务性**：所有已批准设定同步更新 MongoDB（全文）和 ChromaDB（向量）。
+
+---
+
+## 📄 开源协议
+
+本项目采用 [MIT License](./LICENSE) 开源协议。

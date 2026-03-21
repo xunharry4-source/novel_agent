@@ -1,0 +1,15 @@
+# Core Dependencies
+flask
+flask-cors
+pymongo
+chromadb
+langchain
+langchain-openai
+langgraph
+
+# Observability Stack
+sentry-sdk[flask]
+langfuse
+prometheus-flask-exporter
+prometheus-client
+python-dotenv
