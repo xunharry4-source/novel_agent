@@ -24,9 +24,10 @@ import {
   IconRefresh,
   IconSettings,
   IconShieldCheck,
+  IconTrash,
   IconWorld,
 } from '@tabler/icons-react';
-import { api } from '../api/client';
+import { api, getApiErrorMessage } from '../api/client';
 
 type WorldDetailData = {
   world_id: string;
@@ -87,6 +88,8 @@ export const WorldDetail: React.FC = () => {
   const [newSettingKey, setNewSettingKey] = useState('');
   const [newSettingValue, setNewSettingValue] = useState('');
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -158,6 +161,49 @@ export const WorldDetail: React.FC = () => {
     navigate(`/workflow/world?${params.toString()}`);
   };
 
+  const saveWorld = async () => {
+    if (!worldId || !name.trim()) {
+      setError('保存世界必须填写世界名称。');
+      setSuccess(null);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await api.updateWorld({
+        world_id: worldId,
+        name: name.trim(),
+        summary,
+        forbidden_rules: rules.map((item) => item.trim()).filter(Boolean),
+        basic_settings: basicSettings,
+      });
+      await loadWorld();
+      setSuccess(`世界已保存：${worldId}`);
+    } catch (err) {
+      setError(getApiErrorMessage(err, '保存世界失败。'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteWorld = async () => {
+    if (!worldId) return;
+    const confirmed = window.confirm('确认删除该世界以及旗下所有世界观、小说、大纲、章节和设定库内容？此操作不可恢复。');
+    if (!confirmed) return;
+    setDeleting(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await api.deleteWorld({ world_id: worldId, cascade: true });
+      navigate('/worlds');
+    } catch (err) {
+      setError(getApiErrorMessage(err, '删除世界失败。'));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <Stack gap="md" style={{ minHeight: 'calc(100vh - 96px)' }}>
       <Group justify="space-between" align="flex-start">
@@ -172,6 +218,25 @@ export const WorldDetail: React.FC = () => {
         <Group gap="xs">
           <Button variant="light" leftSection={<IconArrowLeft size={16} />} onClick={() => navigate('/worlds')}>返回世界列表</Button>
           <Button variant="light" leftSection={<IconRefresh size={16} />} loading={loading} onClick={loadWorld}>刷新</Button>
+          <Button
+            color="red"
+            variant="light"
+            leftSection={<IconTrash size={16} />}
+            onClick={deleteWorld}
+            loading={deleting}
+            disabled={!world || saving}
+          >
+            删除世界
+          </Button>
+          <Button
+            color="green"
+            leftSection={<IconDeviceFloppy size={16} />}
+            onClick={saveWorld}
+            loading={saving}
+            disabled={!world || !name.trim() || deleting}
+          >
+            保存修改
+          </Button>
           <Button leftSection={<IconDeviceFloppy size={16} />} onClick={openWorldAgentWorkflow} disabled={!world || !name.trim()}>进入世界 Agent 工作流</Button>
         </Group>
       </Group>

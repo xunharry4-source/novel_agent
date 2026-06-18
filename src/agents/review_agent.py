@@ -1,12 +1,24 @@
 import json
 import logging
-from typing import Dict, Any, Tuple, List
+from typing import Callable, Dict, Any, Tuple, List
 
 from langchain_core.messages import SystemMessage, HumanMessage
-from src.common.llm_factory import get_llm
+from openai import APIConnectionError, APITimeoutError
+
+from src.common.llm_factory import get_llm, get_provider_info
 from src.common.lore_utils import get_unified_context, parse_json_safely
 
 logger = logging.getLogger("novel_agent.review_agent")
+
+
+def _review_llm_metadata(raw_content: str, system_prompt: str, user_message: str, entity_type: str) -> Dict[str, Any]:
+    return {
+        "llm_invoked": True,
+        "llm_agent_name": f"{entity_type}_review_agent",
+        "prompt": f"[System]\n{system_prompt}\n\n[User]\n{user_message}",
+        "prompt_chars": len(system_prompt) + len(user_message) + 18,
+        "raw_response_chars": len(raw_content),
+    }
 
 def _get_context_for_review(entity_type: str, payload: Dict[str, Any]) -> str:
     """获取审核所需的上下文信息"""
@@ -14,7 +26,7 @@ def _get_context_for_review(entity_type: str, payload: Dict[str, Any]) -> str:
         query = f"{payload.get('name', '')} {payload.get('title', '')} {payload.get('summary', '')} {payload.get('content', '')}"
         outline_id = payload.get("outline_id") or "default"
         worldview_id = payload.get("worldview_id") or "default_wv"
-        
+
         # 只在有具体内容时进行检索，且如果报错则静默失败，避免阻塞审核
         if len(query.strip()) > 5:
             return get_unified_context(query, outline_id=outline_id, worldview_id=worldview_id)
@@ -136,6 +148,53 @@ def _get_outline_policy_context(db, entity_type: str, payload: Dict[str, Any]) -
     )
 
 
+def _get_chapter_outline_context(db, entity_type: str, payload: Dict[str, Any]) -> str:
+    """读取章节大纲内容，供章节直接内容检查节点强制校验。"""
+    if not entity_type.startswith("chapter"):
+        return "非章节审查，不需要章节大纲。"
+
+    inline_outline = payload.get("chapter_outline") or payload.get("chapter_outline_content") or payload.get("chapter_summary")
+    inline_name = payload.get("chapter_outline_name") or payload.get("name") or payload.get("title")
+    if inline_outline:
+        return (
+            "【章节大纲】\n"
+            f"{json.dumps({'name': inline_name, 'content': inline_outline}, ensure_ascii=False, indent=2)}"
+        )
+
+    target_id = (
+        payload.get("chapter_outline_id")
+        or payload.get("target_id")
+        or payload.get("chapter_id")
+        or payload.get("scene_id")
+        or payload.get("prose_id")
+        or payload.get("id")
+    )
+    if not target_id or db is None:
+        return "未提供章节大纲；如果当前流程要求检查章节大纲，请补充 chapter_outline 或指定可读取的目标章节。"
+
+    try:
+        doc = (
+            db["prose"].find_one({"id": target_id})
+            or db["prose"].find_one({"scene_id": target_id})
+            or db["prose"].find_one({"prose_id": target_id})
+            or {}
+        )
+    except Exception as e:
+        logger.warning(f"Failed to load chapter outline context for review: {e}")
+        return f"读取章节大纲失败：{e}"
+
+    if not doc:
+        return f"未找到 target_id={target_id} 对应的章节大纲。"
+
+    chapter_outline = {
+        "id": doc.get("id") or doc.get("scene_id") or doc.get("prose_id"),
+        "name": doc.get("name") or doc.get("title"),
+        "outline_id": doc.get("outline_id"),
+        "content": doc.get("content"),
+    }
+    return "【章节大纲】\n" + json.dumps(chapter_outline, ensure_ascii=False, indent=2)
+
+
 def _get_previous_chapter_context(db, entity_type: str, payload: Dict[str, Any]) -> str:
     """读取当前章节之前已入库章节，供章节一致性审查强制校验。"""
     if not entity_type.startswith("chapter") or db is None:
@@ -197,15 +256,111 @@ def _get_previous_chapter_context(db, entity_type: str, payload: Dict[str, Any])
         return f"读取前置章节失败：{e}"
 
 
+REVIEW_SECTION_BUILDERS: Dict[str, Tuple[str, Callable[..., str]]] = {
+    "world_policy": (
+        "以下是世界禁止规则与基本设定（必须优先遵守）：",
+        _get_world_policy_context,
+    ),
+    "novel_policy": (
+        "以下是小说禁止规则与基本设定（大纲和章节必须遵守）：",
+        _get_novel_policy_context,
+    ),
+    "outline_policy": (
+        "以下是父级大纲约束（章节必须遵守）：",
+        _get_outline_policy_context,
+    ),
+    "chapter_outline": (
+        "以下是章节大纲约束（直接内容检查必须遵守）：",
+        _get_chapter_outline_context,
+    ),
+    "previous_chapter": (
+        "以下是前置章节上下文（章节一致性审查必须遵守）：",
+        _get_previous_chapter_context,
+    ),
+    "context_reference": (
+        "以下是世界观和背景设定参考（如果有）：",
+        lambda _db, entity_type, payload: _get_context_for_review(entity_type, payload),
+    ),
+}
+
+
+ENTITY_REVIEW_SECTIONS: Dict[str, List[str]] = {
+    "worldview_world_rules": ["world_policy"],
+    "worldview_consistency": ["context_reference"],
+    "novel_world_rules": ["world_policy", "context_reference"],
+    "outline_world_rules": ["world_policy"],
+    "outline_worldview_rules": ["context_reference"],
+    "outline_novel_rules": ["novel_policy"],
+    "chapter_world_rules": ["world_policy"],
+    "chapter_worldview_rules": ["context_reference"],
+    "chapter_novel_rules": ["novel_policy"],
+    "chapter_outline_rules": ["outline_policy"],
+    "chapter_chapter_outline_rules": ["chapter_outline"],
+    "chapter_consistency": ["previous_chapter", "chapter_outline"],
+    "chapter_plot_errors": ["outline_policy", "chapter_outline", "previous_chapter"],
+    "worldview": ["world_policy", "context_reference"],
+    "novel": ["world_policy", "context_reference"],
+    "outline": ["world_policy", "novel_policy", "context_reference"],
+    "chapter": ["world_policy", "novel_policy", "outline_policy", "chapter_outline", "previous_chapter", "context_reference"],
+}
+
+
+def _review_sections_for_entity_type(entity_type: str) -> List[str]:
+    return ENTITY_REVIEW_SECTIONS.get(
+        entity_type,
+        ["world_policy", "novel_policy", "outline_policy", "chapter_outline", "previous_chapter", "context_reference"],
+    )
+
+
+def _build_review_context_blocks(db, entity_type: str, payload: Dict[str, Any]) -> List[str]:
+    blocks: List[str] = []
+    for section_key in _review_sections_for_entity_type(entity_type):
+        title, builder = REVIEW_SECTION_BUILDERS[section_key]
+        content = builder(db, entity_type, payload)
+        blocks.append(f"{title}\n{content}")
+    return blocks
+
+
+def _classify_review_exception(exc: Exception) -> Tuple[str, str]:
+    message = str(exc) or exc.__class__.__name__
+    lowered = message.lower()
+    if isinstance(exc, APITimeoutError) or "timed out" in lowered or "timeout" in lowered:
+        return "timeout", f"大模型审查超时：{message}"
+    if isinstance(exc, APIConnectionError) or "connection error" in lowered or "connection refused" in lowered:
+        return "connection_error", f"大模型连接失败：{message}"
+    return "llm_error", f"执行大模型审查时发生异常: {message}"
+
+
+def _review_error_metadata(system_prompt: str, user_message: str, entity_type: str, error_kind: str, error_message: str) -> Dict[str, Any]:
+    provider_info = get_provider_info()
+    return {
+        "llm_invoked": False,
+        "llm_attempted": True,
+        "llm_agent_name": f"{entity_type}_review_agent",
+        "prompt": f"[System]\n{system_prompt}\n\n[User]\n{user_message}",
+        "prompt_chars": len(system_prompt) + len(user_message) + 18,
+        "error_kind": error_kind,
+        "error_message": error_message,
+        "provider": provider_info.get("provider"),
+        "model": provider_info.get("model"),
+        "base_url": provider_info.get("base_url"),
+    }
+
+
 def get_review_prompt(entity_type: str) -> str:
     """根据实体类型返回专门的系统提示词"""
     base_prompt = (
-        "你是一个极其严格的小说设定审查专家（Review Agent）。\n"
-        "你的任务是审查输入的 JSON 业务内容，找出其中可能存在的逻辑漏洞、设定冲突（反吃设定）和规范问题。\n"
-        "审查结束后，你必须返回一个合法的 JSON，格式如下：\n"
+        "【角色设定】\n"
+        "你是一名极其严格的设定审查专家（Review Agent）。你的唯一职责是审查输入的 JSON 业务内容，找出逻辑漏洞、设定冲突和规范问题。\n\n"
+        "【操作流程 (Mandatory Workflow)】\n"
+        "1. 审查（Review）：逐条检查当前业务内容是否违反父级规则、既有设定、结构要求和显式约束。\n"
+        "2. 判定（Decide）：如果发现任何实质性冲突、缺失或违规，必须判定为不通过，并明确指出问题位置与修正方向。\n"
+        "3. 输出（Output）：只返回合法 JSON，不得输出解释文字、代码块或额外前后缀。\n\n"
+        "【输出要求】\n"
+        "你必须返回如下 JSON：\n"
         "{\n"
         '  "passed": true 或 false,\n'
-        '  "errors": ["错误描述1", "错误建议2"] // 如果 passed 为 true，可返回空数组\n'
+        '  "errors": ["错误描述1", "错误建议2"]\n'
         "}\n\n"
     )
 
@@ -284,6 +439,14 @@ def get_review_prompt(entity_type: str) -> str:
             "3. 必须检查章节收尾是否服务于父级大纲节点，不能自行扩展到未批准的大纲之外。\n"
             "4. 发现正文偏离大纲、删改大纲目标或越权推进后续剧情时，passed 必须为 false。\n"
         )
+    elif entity_type == "chapter_chapter_outline_rules":
+        base_prompt += (
+            "【Chapter Chapter-Outline Review (章节-章节大纲审查) 审查重点】\n"
+            "1. 必须检查直接内容是否严格执行章节大纲中的场景任务、关键事件、冲突顺序、人物动作和收尾目标。\n"
+            "2. 必须检查直接内容是否擅自删除、提前、延后或改写章节大纲中已明确的关键桥段、信息揭示和情绪推进。\n"
+            "3. 必须检查直接内容是否越权补写未在章节大纲中批准的重大设定、重大剧情跳跃或结局变化。\n"
+            "4. 发现直接内容偏离章节大纲、删改章节任务或错置关键事件时，passed 必须为 false。\n"
+        )
     elif entity_type == "chapter_consistency":
         base_prompt += (
             "【Chapter Consistency Review (章节-前文一致性审查) 审查重点】\n"
@@ -292,6 +455,14 @@ def get_review_prompt(entity_type: str) -> str:
             "3. 必须检查叙事视角、语气、章节标题和正文内容是否延续同一作品的连续性。\n"
             "4. 如果当前章节是第一章或没有可用前置章节，可通过审查，但必须只基于当前 payload 判断是否自洽。\n"
             "5. 发现与前置章节冲突或承接断裂时，passed 必须为 false，并指出冲突章节、冲突点和修正方向。\n"
+        )
+    elif entity_type == "chapter_plot_errors":
+        base_prompt += (
+            "【Chapter Plot Error Review (章节-剧情错误审查) 审查重点】\n"
+            "1. 必须检查直接内容内部是否存在因果断裂、时间线跳变、人物动机突变、信息来源不明、道具/伤势/资源凭空变化等剧情错误。\n"
+            "2. 必须检查场景切换是否交代清楚，事件推进是否存在缺失步骤、逻辑黑箱或前后自相矛盾。\n"
+            "3. 必须检查直接内容与章节大纲、前置章节和当前父级上下文之间是否存在知识泄漏、伏笔丢失、角色突然知晓未知事实等问题。\n"
+            "4. 发现任何实质性剧情错误时，passed 必须为 false，并说明错误位置、错误类型和修正方向。\n"
         )
     elif entity_type == "worldview":
         base_prompt += (
@@ -330,62 +501,114 @@ def get_review_prompt(entity_type: str) -> str:
 
     return base_prompt
 
+
+def build_review_messages(db, entity_type: str, payload: Dict[str, Any]) -> Tuple[str, str]:
+    """构造审查节点实际发送给 LLM 的 system/user 消息。"""
+    system_prompt = get_review_prompt(entity_type)
+    context_blocks = _build_review_context_blocks(db, entity_type, payload)
+    message_parts = list(context_blocks)
+    message_parts.append(
+        f"以下是需要你审查的当前 {entity_type} 业务内容（JSON格式）：\n"
+        f"{json.dumps(payload, ensure_ascii=False, indent=2)}"
+    )
+    message_parts.append("请严格按照要求审查，并仅输出符合要求的 JSON 格式结果。")
+    user_message = "\n\n".join(message_parts)
+    return system_prompt, user_message
+
 def execute_llm_review(db, entity_type: str, payload: Dict[str, Any]) -> Tuple[bool, List[str]]:
     """
     调用大模型对 payload 进行深度逻辑与设定审查。
-    
+
     Returns:
         (passed: bool, errors: list[str])
     """
     logger.info(f"Executing LLM review for {entity_type}")
-    
+
     try:
-        # 获取上下文设定
-        context_text = _get_context_for_review(entity_type, payload)
-        world_policy_context = _get_world_policy_context(db, entity_type, payload)
-        novel_policy_context = _get_novel_policy_context(db, entity_type, payload)
-        outline_policy_context = _get_outline_policy_context(db, entity_type, payload)
-        previous_chapter_context = _get_previous_chapter_context(db, entity_type, payload)
-        
-        # 构建消息
-        system_prompt = get_review_prompt(entity_type)
-        user_message = (
-            f"以下是世界禁止规则与基本设定（必须优先遵守）：\n{world_policy_context}\n\n"
-            f"以下是小说禁止规则与基本设定（大纲和章节必须遵守）：\n{novel_policy_context}\n\n"
-            f"以下是父级大纲约束（章节必须遵守）：\n{outline_policy_context}\n\n"
-            f"以下是前置章节上下文（章节一致性审查必须遵守）：\n{previous_chapter_context}\n\n"
-            f"以下是世界观和背景设定参考（如果有）：\n{context_text}\n\n"
-            f"以下是需要你审查的当前 {entity_type} 业务内容（JSON格式）：\n"
-            f"{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-            "请严格按照要求审查，并仅输出符合要求的 JSON 格式结果。"
-        )
+        system_prompt, user_message = build_review_messages(db, entity_type, payload)
 
         llm = get_llm(json_mode=True, agent_name=f"{entity_type}_review_agent")
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_message)
         ]
-        
+
         response = llm.invoke(messages)
         content = response.content
         logger.debug(f"Review Agent Raw Response: {content}")
-        
+
         result = parse_json_safely(content)
         if isinstance(result, dict) and "passed" in result:
             passed = bool(result.get("passed", False))
             errors = result.get("errors", [])
             if not isinstance(errors, list):
                 errors = [str(errors)]
-            
+
             # 如果判定为 failed 但没有给理由，强制补充
             if not passed and not errors:
                 errors = ["LLM 审查未通过，但未提供具体原因。"]
-                
+
             return passed, errors
         else:
             logger.warning(f"Review Agent returned malformed JSON: {content}")
             return False, ["审查模型返回了无效的格式，无法解析判定结果。"]
-            
+
     except Exception as e:
         logger.error(f"Error in execute_llm_review for {entity_type}: {e}", exc_info=True)
         return False, [f"执行大模型审查时发生异常: {str(e)}"]
+
+
+def execute_llm_review_detail(db, entity_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """返回审查结论及可审计的 LLM 调用明细。"""
+    logger.info(f"Executing LLM review detail for {entity_type}")
+    system_prompt = ""
+    user_message = ""
+
+    try:
+        system_prompt, user_message = build_review_messages(db, entity_type, payload)
+
+        llm = get_llm(json_mode=True, agent_name=f"{entity_type}_review_agent")
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_message),
+        ]
+
+        response = llm.invoke(messages)
+        content = response.content
+        logger.debug(f"Review Agent Raw Response: {content}")
+        llm_call = _review_llm_metadata(content, system_prompt, user_message, entity_type)
+
+        result = parse_json_safely(content)
+        if isinstance(result, dict) and "passed" in result:
+            passed = bool(result.get("passed", False))
+            errors = result.get("errors", [])
+            if not isinstance(errors, list):
+                errors = [str(errors)]
+            if not passed and not errors:
+                errors = ["LLM 审查未通过，但未提供具体原因。"]
+            return {
+                "passed": passed,
+                "errors": errors,
+                "llm_invoked": True,
+                "llm_call": llm_call,
+                "raw_response": content,
+            }
+
+        logger.warning(f"Review Agent returned malformed JSON: {content}")
+        return {
+            "passed": False,
+            "errors": ["审查模型返回了无效的格式，无法解析判定结果。"],
+            "llm_invoked": True,
+            "llm_call": llm_call,
+            "raw_response": content,
+        }
+    except Exception as e:
+        logger.error(f"Error in execute_llm_review_detail for {entity_type}: {e}", exc_info=True)
+        error_kind, error_text = _classify_review_exception(e)
+        return {
+            "passed": False,
+            "errors": [error_text],
+            "llm_invoked": False,
+            "llm_call": _review_error_metadata(system_prompt, user_message, entity_type, error_kind, str(e)),
+            "raw_response": "",
+        }

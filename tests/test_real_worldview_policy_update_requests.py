@@ -9,12 +9,17 @@ from real_request_test_utils import cleanup_world, create_world, create_worldvie
 def test_real_worldview_policy_update_requests():
     suffix = unique_suffix("worldview_policy_update")
     world_id = f"world_{suffix}"
-    worldview_id = f"wv_{suffix}"
     updated_rules = ["禁止世界观条目与灯塔公会登记制度冲突"]
     updated_settings = {"canon_scope": "北港灯塔", "continuity_rule": "所有潮汐刻度必须可追溯"}
     try:
-        create_world(world_id=world_id, name=f"World {suffix}", summary="世界观规则字段更新父级世界")
-        create_worldview(world_id=world_id, worldview_id=worldview_id, name=f"Worldview {suffix}", summary="原始世界观")
+        world = create_world(world_id=world_id, name=f"World {suffix}", summary="世界观规则字段更新父级世界")
+        worldview = create_worldview(
+            world_id=world_id,
+            worldview_id=world["worldview_id"],
+            name=f"Worldview {suffix}",
+            summary="原始世界观",
+        )
+        worldview_id = worldview["worldview_id"]
         response = request_json(
             "POST",
             "/api/worldviews/update",

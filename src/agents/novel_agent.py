@@ -125,7 +125,7 @@ def _extract_llm_content(response: Any) -> str:
     return str(content or "")
 
 
-def _llm_metadata(raw_content: str) -> Dict[str, Any]:
+def _llm_metadata(raw_content: str, prompt: str) -> Dict[str, Any]:
     """生成本次 novel_agent LLM 调用的中文可审计元数据。"""
     config = get_config()
     provider = str(config.get("LLM_PROVIDER", "ollama")).lower()
@@ -134,7 +134,7 @@ def _llm_metadata(raw_content: str) -> Dict[str, Any]:
     provider_config = (config.get("LLM_MODELS") or {}).get(provider) or {}
     if isinstance(provider_config, dict) and not model_name:
         model_name = provider_config.get("default")
-    return {"llm_invoked": True, "llm_agent_name": AGENT_NAME, "provider": provider, "model": model_name or config.get("DEFAULT_MODEL"), "json_mode": True, "raw_response_chars": len(raw_content)}
+    return {"llm_invoked": True, "llm_agent_name": AGENT_NAME, "provider": provider, "model": model_name or config.get("DEFAULT_MODEL"), "json_mode": True, "raw_response_chars": len(raw_content), "prompt": prompt, "prompt_chars": len(prompt)}
 
 
 def _invoke_llm(prompt: str) -> tuple[str, Dict[str, Any]]:
@@ -148,7 +148,7 @@ def _invoke_llm(prompt: str) -> tuple[str, Dict[str, Any]]:
     raw_content = _extract_llm_content(response)
     if not raw_content.strip():
         raise ValueError(f"{AGENT_NAME} returned empty LLM response")
-    return raw_content, _llm_metadata(raw_content)
+    return raw_content, _llm_metadata(raw_content, prompt)
 
 
 def _node(node_id: str, status: str, node_input: Dict[str, Any], output: Dict[str, Any]) -> Dict[str, Any]:
@@ -159,10 +159,15 @@ def _node(node_id: str, status: str, node_input: Dict[str, Any], output: Dict[st
 
 
 def build_initial_expansion_prompt(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str], feedback: str) -> str:
-    """构造 novel_agent 初始扩充 Prompt，专门整理小说项目输入。"""
-    return f"""你是 novel_agent 的初始扩充节点，只负责小说项目输入整理。
-禁止使用通用 Agent 口径。禁止生成世界观条目、大纲或章节正文。禁止写库。禁止返回解释文字。
+    """构造 novel_agent 初始扩充 Prompt，使用结构化模板明确小说项目任务。"""
+    return f"""【角色设定】
+你是一名小说项目编辑。你的唯一职责是整理和扩充小说项目本身，不得越权生成世界观条目、大纲或章节正文。
 
+【操作流程 (Mandatory Workflow)】
+1. 审查（Review）：检查小说草稿与父级 world/worldview 约束是否冲突，确认标题、简介、摘要方向和业务 ID 是否完整、自洽。
+2. 扩展（Expand）：在不偏离用户原始创意的前提下，补全故事类型、主角方向、核心卖点、小说级 forbidden_rules 与 basic_settings，明确后续大纲和章节必须遵守的约束。
+
+【输入信息】
 【业务动作】{action}
 【所属世界 world_id】{payload.get("world_id", "")}
 【小说 ID】{payload.get("novel_id", "") or payload.get("target_id", "")}
@@ -170,15 +175,14 @@ def build_initial_expansion_prompt(action: str, payload: Dict[str, Any], message
 【用户消息】{message}
 【人工反馈】{feedback}
 【修改模式】{revision_mode or "initial_expansion"}
-【原始 payload】
+【小说草稿】
 {json.dumps(payload or {}, ensure_ascii=False, indent=2)}
 
-任务：
-1. 保留小说标题、介绍、简介、world_id、worldview_id、novel_id 或 target_id。
-2. 补全故事类型、核心卖点、主角方向、父级世界约束和不可偏离的用户指令。
-3. 必须生成小说级 forbidden_rules（小说禁止规则）和 basic_settings（小说基本设定），供大纲与章节审查节点强制校验。
+【输出要求】
+1. 只返回合法 JSON，不得返回解释文字，不得写库。
+2. 必须保留小说标题、介绍、简介、world_id、worldview_id、novel_id、target_id。
+3. 必须生成小说级 `forbidden_rules` 与 `basic_settings`，供大纲与章节审查强制校验。
 4. 小说级规则不得违反父级世界禁止规则与基本设定。
-5. 输出必须是可直接提交审查的小说项目 payload，但不得写库。
 
 只返回合法 JSON：
 {{
@@ -245,15 +249,21 @@ def generate_initial_expansion(action: str, payload: Dict[str, Any], message: st
 
 
 def build_modification_prompt(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str], feedback: str, expansion_error: str = "") -> str:
-    """构造 novel_agent 修改内容 Prompt，只允许按反馈修正小说项目设定。"""
+    """构造 novel_agent 修改内容 Prompt，使用结构化模板明确局部修正任务。"""
     rag_context = get_unified_context(
         f"{message}\n{payload.get('name', '')}\n{payload.get('summary', '')}",
         worldview_id=str(payload.get("worldview_id") or "default_wv"),
     )
     retry_clause = f"\n【审查失败原因】{expansion_error}\n必须根据失败原因重新修正小说项目内容。" if expansion_error else ""
-    return f"""你是 novel_agent 的修改内容节点，只负责按反馈修正某个 world_id 下的小说项目。
-禁止生成世界观条目、大纲或章节正文。禁止写库。禁止返回解释文字。
+    return f"""【角色设定】
+你是一名小说项目编辑。你的唯一职责是修正小说项目本身，不得越权生成世界观条目、大纲或章节正文。
 
+【操作流程 (Mandatory Workflow)】
+1. 审查（Review）：检查当前小说项目与审查意见、人工反馈、父级 world/worldview 约束之间的冲突点。
+2. 修正（Modify）：根据【人工反馈或审查意见】和【修改模式】对小说项目做局部、精准修改，不得超范围改写。
+3. 扩展（Expand）：仅在修正完成后，补充必要细节，让故事主旨、主角方向、核心冲突和小说级规则更完整，但不得偏离反馈要求。 
+
+【输入信息】
 【业务动作】{action}
 【所属世界 world_id】{payload.get("world_id", "")}
 【小说 ID】{payload.get("novel_id", "") or payload.get("target_id", "")}
@@ -266,12 +276,11 @@ def build_modification_prompt(action: str, payload: Dict[str, Any], message: str
 【RAG 上下文】
 {rag_context}{retry_clause}
 
-修改规则：
-1. 只修正审查失败原因或人工反馈要求修改的内容。
-2. 必须补全核心主旨、主角轮廓、初期目标、核心冲突、世界规则契合方式。
-3. 必须保留 world_id、novel_id、target_id，且不得破坏未点名内容。
-4. forbidden_rules 与 basic_settings 是后续大纲、章节审查依据，必须保留或按人工反馈精确修改。
-5. 小说级规则不得违反父级世界禁止规则与基本设定。
+【输出要求】
+1. 只返回合法 JSON，不得返回解释文字，不得写库。
+2. 只修正审查失败原因或人工反馈要求修改的内容，必须保留 world_id、novel_id、target_id，且不得破坏未点名内容。
+3. `forbidden_rules` 与 `basic_settings` 是后续大纲、章节审查依据，必须保留或按反馈精确修改。
+4. 小说级规则不得违反父级世界禁止规则与基本设定。
 
 只返回合法 JSON：
 {{

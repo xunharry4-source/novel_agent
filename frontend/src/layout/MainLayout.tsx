@@ -25,7 +25,7 @@ export const MainLayout: React.FC = () => {
 
   const menuItems = [
     { text: '世界层级', icon: <DashboardIcon />, path: '/worlds' },
-    { text: '世界观管理', icon: <LoreIcon />, path: '/worldviews' },
+    { text: '世界观设定', icon: <LoreIcon />, path: '/worldviews' },
     { text: '星际图谱', icon: <AccountTreeIcon />, path: '/visualizer' },
     { text: '设定知识库', icon: <BookIcon />, path: '/lore' },
     { text: '小说项目管理', icon: <DashboardIcon />, path: '/novels' },

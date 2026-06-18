@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-  Alert, Box, Typography, Paper, Grid,
+  Alert, Box, Typography, Paper,
   IconButton, Button, TextField, InputAdornment, Chip,
   List, ListItem, ListItemButton, ListItemText, ListItemIcon,
-  Dialog, DialogTitle, DialogContent, DialogActions,
   CircularProgress, Tooltip, Stack, Collapse,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   ToggleButton, ToggleButtonGroup,
@@ -15,14 +14,18 @@ import {
   LibraryBooks as LoreIcon,
   Delete as DeleteIcon,
   Edit as EditIcon,
+  PlaylistAdd as AddSiblingIcon,
   Public as WorldviewIcon,
-  AutoAwesome as MagicIcon,
   Refresh as RefreshIcon,
   AccountTree as TreeIcon,
+  SubdirectoryArrowRight as AddChildIcon,
   TableRows as TableIcon,
+  UploadFile as UploadFileIcon,
   ExpandMore as ExpandMoreIcon,
   ChevronRight as ChevronRightIcon
 } from '@mui/icons-material';
+import { getWorldviewDisplayName } from '../utils/worldview';
+import { useNavigate } from 'react-router-dom';
 
 // --- Types ---
 interface World {
@@ -34,7 +37,8 @@ interface World {
 interface Worldview {
   worldview_id: string;
   world_id?: string;
-  name: string;
+  name?: string;
+  title?: string;
   summary?: string;
 }
 
@@ -44,6 +48,7 @@ interface LoreEntry {
   name: string;
   content: string;
   category: string;
+  path?: string;
   timestamp?: string;
   outline_id?: string | null;
   worldview_id?: string | null;
@@ -56,7 +61,16 @@ interface LoreTreeNode {
   order: number;
   children: Record<string, LoreTreeNode>;
   entries: LoreEntry[];
+  hierarchyPath?: string[];
 }
+
+const normalizeHierarchyPath = (rawPath: string | undefined | null): string[] => (
+  String(rawPath || '')
+    .replace(/\//g, '>')
+    .split('>')
+    .map((part) => part.trim())
+    .filter(Boolean)
+);
 
 export const LoreDB: React.FC = () => {
   const [worlds, setWorlds] = useState<World[]>([]);
@@ -68,11 +82,13 @@ export const LoreDB: React.FC = () => {
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [isWVModalOpen, setIsWVModalOpen] = useState(false);
-  const [isEntryModalOpen, setIsEntryModalOpen] = useState(false);
-  const [newWV, setNewWV] = useState({ name: '', summary: '' });
-  const [editingEntry, setEditingEntry] = useState<Partial<LoreEntry> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [entryPage, setEntryPage] = useState(1);
+  const [entryPageSize, setEntryPageSize] = useState(20);
+  const [hasMoreEntries, setHasMoreEntries] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const navigate = useNavigate();
 
   // --- API Calls ---
 
@@ -109,6 +125,7 @@ export const LoreDB: React.FC = () => {
       setWorldviews([]);
       setSelectedWV(null);
       setEntries([]);
+      setHasMoreEntries(false);
       return;
     }
     setLoading(true);
@@ -122,30 +139,39 @@ export const LoreDB: React.FC = () => {
         throw new Error(`接口返回了非当前世界的世界观: ${mismatched.map((item: Worldview) => item.worldview_id).join(', ')}`);
       }
       setWorldviews(data);
-      setSelectedWV((current) => {
-        if (data.some((worldview: Worldview) => worldview.worldview_id === current)) return current;
-        return data[0]?.worldview_id || null;
-      });
-      if (data.length === 0) setEntries([]);
+      if (data.length > 1) {
+        setSelectedWV(null);
+        setEntries([]);
+        setHasMoreEntries(false);
+        setError(`当前世界返回了 ${data.length} 个世界观设定集，违反“一世界一设定集”规则，/worldviews 无法继续按正常结构管理设定条目。`);
+        return;
+      }
+      setSelectedWV(data[0]?.worldview_id || null);
+      if (data.length === 0) {
+        setEntries([]);
+        setHasMoreEntries(false);
+      }
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
       setWorldviews([]);
       setSelectedWV(null);
       setEntries([]);
+      setHasMoreEntries(false);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const fetchEntries = useCallback(async (currentWorldId: string, wvId: string, query: string = '') => {
+  const fetchEntries = useCallback(async (currentWorldId: string, wvId: string, query: string = '', page: number = 1, pageSize: number = 20) => {
     if (!currentWorldId || !wvId) {
       setEntries([]);
+      setHasMoreEntries(false);
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const url = `/api/lore/list?world_id=${encodeURIComponent(currentWorldId)}&worldview_id=${encodeURIComponent(wvId)}${query ? `&query=${encodeURIComponent(query)}` : ''}&page=1&page_size=50`;
+      const url = `/api/lore/list?world_id=${encodeURIComponent(currentWorldId)}&worldview_id=${encodeURIComponent(wvId)}${query ? `&query=${encodeURIComponent(query)}` : ''}&page=${page}&page_size=${pageSize}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
       const data = await res.json();
@@ -154,9 +180,11 @@ export const LoreDB: React.FC = () => {
         throw new Error(`接口返回了非当前世界的设定条目: ${mismatched.map((entry: LoreEntry) => entry.id).join(', ')}`);
       }
       setEntries(data);
+      setHasMoreEntries(data.length === pageSize);
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
       setEntries([]);
+      setHasMoreEntries(false);
     } finally {
       setLoading(false);
     }
@@ -167,59 +195,22 @@ export const LoreDB: React.FC = () => {
   }, [fetchWorlds]);
 
   useEffect(() => {
+    setEntryPage(1);
+    setExpandedNodes({});
+  }, [searchQuery, selectedWorldId, selectedWV]);
+
+  useEffect(() => {
     fetchWorldviews(selectedWorldId);
   }, [selectedWorldId, fetchWorldviews]);
 
   useEffect(() => {
     if (selectedWorldId && selectedWV) {
-      fetchEntries(selectedWorldId, selectedWV, searchQuery);
+      fetchEntries(selectedWorldId, selectedWV, searchQuery, entryPage, entryPageSize);
     } else {
       setEntries([]);
+      setHasMoreEntries(false);
     }
-  }, [selectedWorldId, selectedWV, searchQuery, fetchEntries]);
-
-  const handleCreateWorldview = async () => {
-    if (!newWV.name || !selectedWorldId) return;
-    setError(null);
-    try {
-      const res = await fetch('/api/worldviews/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...newWV, world_id: selectedWorldId })
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-      const data = await res.json();
-      await fetchWorldviews(selectedWorldId);
-      setSelectedWV(data.worldview_id);
-      setIsWVModalOpen(false);
-      setNewWV({ name: '', summary: '' });
-    } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const handleSaveEntry = async () => {
-    if (!editingEntry?.name || !selectedWV || !selectedWorldId) return;
-    setError(null);
-    try {
-      const res = await fetch('/api/archive/update', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...editingEntry,
-          type: 'worldview',
-          world_id: selectedWorldId,
-          worldview_id: selectedWV
-        })
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-      fetchEntries(selectedWorldId, selectedWV, searchQuery);
-      setIsEntryModalOpen(false);
-      setEditingEntry(null);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
-    }
-  };
+  }, [entryPage, entryPageSize, selectedWorldId, selectedWV, searchQuery, fetchEntries]);
 
   const handleDeleteEntry = async (id: string) => {
     if (!selectedWorldId || !selectedWV) return;
@@ -232,10 +223,54 @@ export const LoreDB: React.FC = () => {
         body: JSON.stringify({ id, type: 'worldview', world_id: selectedWorldId, worldview_id: selectedWV })
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-      fetchEntries(selectedWorldId, selectedWV, searchQuery);
+      fetchEntries(selectedWorldId, selectedWV, searchQuery, entryPage, entryPageSize);
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
     }
+  };
+
+  const openImportPicker = () => {
+    if (!selectedWorldId || !selectedWV || worldviews.length !== 1) return;
+    fileInputRef.current?.click();
+  };
+
+  const importWorldviewHierarchy = async (file: File) => {
+    if (!selectedWorldId || !selectedWV) return;
+    setImporting(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append('world_id', selectedWorldId);
+      form.append('worldview_id', selectedWV);
+      form.append('file', file);
+      const response = await fetch('/api/worldviews/import', {
+        method: 'POST',
+        body: form,
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(`导入失败 ${response.status}: ${JSON.stringify(data)}`);
+      }
+      const importedEntries = (data.entries || []) as Array<{ id: string; name: string; path: string }>;
+      if (importedEntries.length === 0) {
+        throw new Error('导入接口未返回任何写入条目，拒绝伪造成功');
+      }
+      setEntryPage(1);
+      await fetchEntries(selectedWorldId, selectedWV, searchQuery, 1, entryPageSize);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleImportFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    await importWorldviewHierarchy(file);
   };
 
   // --- UI Renderers ---
@@ -244,7 +279,7 @@ export const LoreDB: React.FC = () => {
     const selectedWorld = worlds.find((world) => world.world_id === selectedWorldId);
     const worldName = selectedWorld?.name || selectedWorldId || '未选择世界';
     const selectedWorldview = worldviews.find((worldview) => worldview.worldview_id === selectedWV);
-    const worldviewName = selectedWorldview?.name || selectedWV || '未选择世界观';
+    const worldviewName = getWorldviewDisplayName(selectedWorldview) || selectedWV || '未选择世界观';
     const outlineNameById = new Map<string, string>();
 
     entries.forEach((entry) => {
@@ -254,7 +289,13 @@ export const LoreDB: React.FC = () => {
       }
     });
 
-    const getChild = (parent: LoreTreeNode, key: string, name: string, order: number) => {
+    const getChild = (
+      parent: LoreTreeNode,
+      key: string,
+      name: string,
+      order: number,
+      hierarchyPath?: string[],
+    ) => {
       if (!parent.children[key]) {
         parent.children[key] = {
           name,
@@ -262,9 +303,13 @@ export const LoreDB: React.FC = () => {
           order,
           children: {},
           entries: [],
+          hierarchyPath,
         };
       } else {
         parent.children[key].name = name;
+        if (hierarchyPath !== undefined) {
+          parent.children[key].hierarchyPath = hierarchyPath;
+        }
       }
       return parent.children[key];
     };
@@ -276,7 +321,7 @@ export const LoreDB: React.FC = () => {
       `世界观：${worldviewName}`,
       0
     );
-    const worldviewEntriesNode = getChild(worldviewNode, 'worldview-entries', '世界观设定', 0);
+    const worldviewEntriesNode = getChild(worldviewNode, 'worldview-entries', '世界观设定', 0, []);
     const uncategorizedNovelNode = getChild(worldviewNode, 'novel:unassigned', '小说：未归属小说', 99);
     const uncategorizedOutlineNode = getChild(uncategorizedNovelNode, 'outline:unassigned', '大纲：未归属大纲', 0);
 
@@ -291,7 +336,19 @@ export const LoreDB: React.FC = () => {
 
     entries.forEach((entry) => {
       if (entry.type === 'worldview') {
-        worldviewEntriesNode.entries.push(entry);
+        const pathParts = normalizeHierarchyPath(entry.path || entry.category || '');
+        const nodePath = pathParts[pathParts.length - 1] === entry.name ? pathParts.slice(0, -1) : pathParts;
+        let currentNode = worldviewEntriesNode;
+        nodePath.forEach((part, index) => {
+          currentNode = getChild(
+            currentNode,
+            `wv-path:${nodePath.slice(0, index + 1).join('>')}`,
+            part,
+            0,
+            nodePath.slice(0, index + 1),
+          );
+        });
+        currentNode.entries.push(entry);
         return;
       }
 
@@ -327,9 +384,70 @@ export const LoreDB: React.FC = () => {
     return root;
   }, [entries, selectedWV, selectedWorldId, worldviews, worlds]);
 
+  const activeWorldview = useMemo(
+    () => (worldviews.length === 1 ? worldviews[0] : null),
+    [worldviews],
+  );
+
+  const getEntryPathParts = (entry: LoreEntry) => {
+    const rawParts = normalizeHierarchyPath(entry.path || entry.category || '');
+    if (rawParts.length === 0) {
+      return entry.name ? [entry.name] : [];
+    }
+    return rawParts[rawParts.length - 1] === entry.name ? rawParts : [...rawParts, entry.name].filter(Boolean);
+  };
+
+  const openWorldviewWorkflow = (
+    action: 'create' | 'update',
+    entry?: LoreEntry,
+    options?: { parentPath?: string[]; message?: string; currentPath?: string; },
+  ) => {
+    if (!selectedWorldId || !selectedWV) return;
+    const params = new URLSearchParams({
+      action,
+      world_id: selectedWorldId,
+      worldview_id: selectedWV,
+    });
+    if (entry) {
+      params.set('id', entry.id);
+      params.set('name', entry.name);
+      params.set('summary', entry.content || '');
+      params.set('path', entry.path || entry.category || '');
+    }
+    if (options?.parentPath) {
+      params.set('parent_path', options.parentPath.join(' > '));
+    }
+    if (options?.currentPath) {
+      params.set('path', options.currentPath);
+    }
+    if (options?.message) {
+      params.set('message', options.message);
+    }
+    navigate(`/workflow/worldview?${params.toString()}`);
+  };
+
   const openEntryEditor = (entry: LoreEntry) => {
-    setEditingEntry(entry);
-    setIsEntryModalOpen(true);
+    openWorldviewWorkflow('update', entry);
+  };
+
+  const createChildEntry = (parentPath: string[], currentPathLabel: string) => {
+    const message = parentPath.length > 0
+      ? `在 ${parentPath.join(' > ')} 下新增世界观设定`
+      : '新增顶层世界观设定';
+    openWorldviewWorkflow('create', undefined, {
+      parentPath,
+      message,
+      currentPath: currentPathLabel,
+    });
+  };
+
+  const createSiblingEntry = (entry: LoreEntry) => {
+    const pathParts = getEntryPathParts(entry);
+    createChildEntry(pathParts.slice(0, -1), entry.path || entry.category || pathParts.slice(0, -1).join(' > '));
+  };
+
+  const createChildUnderEntry = (entry: LoreEntry) => {
+    createChildEntry(getEntryPathParts(entry), entry.path || entry.category || entry.name);
   };
 
   const toggleTreeNode = (path: string) => {
@@ -359,6 +477,20 @@ export const LoreDB: React.FC = () => {
                 primaryTypographyProps={{ variant: 'body2', fontWeight: 800 }}
                 secondaryTypographyProps={{ variant: 'caption', sx: { opacity: 0.55 } }}
               />
+              {node.hierarchyPath !== undefined && (
+                <Tooltip title={node.hierarchyPath.length > 0 ? `在“${node.name}”下新增子设定` : '新增顶层设定'}>
+                  <IconButton
+                    size="small"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      createChildEntry(node.hierarchyPath || [], (node.hierarchyPath || []).join(' > '));
+                    }}
+                    sx={{ color: 'rgba(255,255,255,0.45)' }}
+                  >
+                    <AddChildIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
             </ListItemButton>
           </ListItem>
         )}
@@ -395,6 +527,30 @@ export const LoreDB: React.FC = () => {
                       },
                     }}
                   />
+                  <Tooltip title="新增同级设定">
+                    <IconButton
+                      size="small"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        createSiblingEntry(entry);
+                      }}
+                      sx={{ color: 'rgba(255,255,255,0.3)', '&:hover': { color: 'primary.light' } }}
+                    >
+                      <AddSiblingIcon sx={{ fontSize: 16 }} />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="新增子设定">
+                    <IconButton
+                      size="small"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        createChildUnderEntry(entry);
+                      }}
+                      sx={{ color: 'rgba(255,255,255,0.3)', '&:hover': { color: 'primary.light' } }}
+                    >
+                      <AddChildIcon sx={{ fontSize: 16 }} />
+                    </IconButton>
+                  </Tooltip>
                   <IconButton
                     size="small"
                     onClick={(event) => {
@@ -416,52 +572,44 @@ export const LoreDB: React.FC = () => {
   return (
     <Box sx={{ display: 'flex', height: 'calc(100vh - 120px)', gap: 3 }}>
       
-      {/* Sidebar: Worldview List */}
+      {/* Sidebar: current world's unique worldview set */}
       <Paper className="glass-panel" sx={{ width: 280, p: 2, borderRadius: '20px', display: 'flex', flexDirection: 'column' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2, px: 1 }}>
-          <Typography variant="subtitle1" sx={{ fontWeight: 800, color: 'primary.main' }}>世界观架构</Typography>
-          <Tooltip title="新建世界观">
-            <span>
-            <IconButton size="small" disabled={!selectedWorldId} onClick={() => setIsWVModalOpen(true)} sx={{ color: 'primary.main' }}>
-              <AddIcon fontSize="small" />
-            </IconButton>
-            </span>
-          </Tooltip>
+          <Typography variant="subtitle1" sx={{ fontWeight: 800, color: 'primary.main' }}>当前世界设定集</Typography>
+          <Chip label="一世界一库" size="small" color="primary" variant="outlined" />
         </Box>
         
         <List sx={{ flexGrow: 1, overflowY: 'auto', px: 0 }}>
           {!selectedWorldId ? (
             <Alert severity="warning" sx={{ borderRadius: '12px' }}>必须选择世界</Alert>
+          ) : worldviews.length > 1 ? (
+            <Alert severity="error" sx={{ borderRadius: '12px' }}>
+              当前世界存在多个设定集，已违反业务规则，请先清理脏数据。
+            </Alert>
           ) : worldviews.length === 0 ? (
             <Box sx={{ textAlign: 'center', py: 6, opacity: 0.45 }}>
               <WorldviewIcon sx={{ fontSize: 44, mb: 1 }} />
-              <Typography variant="body2">当前世界暂无世界观</Typography>
+              <Typography variant="body2">当前世界缺少自动创建的世界观设定库</Typography>
             </Box>
-          ) : worldviews.map((wv) => (
-            <ListItem key={wv.worldview_id} disablePadding sx={{ mb: 1 }}>
-              <ListItemButton
-                selected={selectedWV === wv.worldview_id}
-                onClick={() => setSelectedWV(wv.worldview_id)}
-                sx={{
-                  borderRadius: '12px',
-                  '&.Mui-selected': {
-                    bgcolor: 'rgba(0, 188, 212, 0.15)',
-                    '&:hover': { bgcolor: 'rgba(0, 188, 212, 0.2)' }
-                  }
-                }}
-              >
-                <ListItemIcon sx={{ minWidth: 40 }}>
-                  <WorldviewIcon sx={{ fontSize: 20, color: selectedWV === wv.worldview_id ? 'primary.main' : 'rgba(255,255,255,0.4)' }} />
-                </ListItemIcon>
-                <ListItemText 
-                  primary={wv.name} 
-                  primaryTypographyProps={{ variant: 'body2', fontWeight: selectedWV === wv.worldview_id ? 700 : 500 }}
-                  secondary={wv.summary}
-                  secondaryTypographyProps={{ variant: 'caption', noWrap: true, sx: { opacity: 0.5 } }}
-                />
-              </ListItemButton>
-            </ListItem>
-          ))}
+          ) : activeWorldview ? (
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: '14px', bgcolor: 'rgba(255,255,255,0.02)' }}>
+              <Stack spacing={1.25}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <WorldviewIcon sx={{ color: 'primary.main' }} />
+                  <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                    {getWorldviewDisplayName(activeWorldview)}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" sx={{ opacity: 0.72, wordBreak: 'break-word' }}>
+                  库 ID：{activeWorldview.worldview_id}
+                </Typography>
+                <Typography variant="body2" sx={{ opacity: 0.72 }}>
+                  {activeWorldview.summary || '该世界的所有世界观设定会在右侧按分页显示。'}
+                </Typography>
+                <Chip label="仅此唯一设定集" size="small" color="primary" sx={{ alignSelf: 'flex-start' }} />
+              </Stack>
+            </Paper>
+          ) : null}
         </List>
       </Paper>
 
@@ -471,6 +619,13 @@ export const LoreDB: React.FC = () => {
         
         {/* Header Controls */}
         <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json,.md,.markdown,.xml,.opml"
+            style={{ display: 'none' }}
+            onChange={handleImportFileChange}
+          />
           <FormControl size="small" required sx={{ minWidth: 280 }}>
             <InputLabel id="lore-world-select-label">世界</InputLabel>
             <Select
@@ -514,11 +669,8 @@ export const LoreDB: React.FC = () => {
           <Button
             variant="contained"
             startIcon={<AddIcon />}
-            disabled={!selectedWorldId || !selectedWV}
-            onClick={() => {
-              setEditingEntry({ id: '', name: '', content: '', category: 'General' });
-              setIsEntryModalOpen(true);
-            }}
+            disabled={!selectedWorldId || !selectedWV || worldviews.length !== 1}
+            onClick={() => openWorldviewWorkflow('create')}
             sx={{ 
               borderRadius: '12px', 
               whiteSpace: 'nowrap',
@@ -528,9 +680,18 @@ export const LoreDB: React.FC = () => {
           >
             新增设定
           </Button>
+          <Button
+            variant="outlined"
+            startIcon={<UploadFileIcon />}
+            disabled={!selectedWorldId || !selectedWV || worldviews.length !== 1 || importing}
+            onClick={openImportPicker}
+            sx={{ borderRadius: '12px', whiteSpace: 'nowrap' }}
+          >
+            {importing ? '导入中...' : '导入设定'}
+          </Button>
           <IconButton
-            disabled={!selectedWorldId || !selectedWV}
-            onClick={() => selectedWorldId && selectedWV && fetchEntries(selectedWorldId, selectedWV, searchQuery)}
+            disabled={!selectedWorldId || !selectedWV || worldviews.length !== 1}
+            onClick={() => selectedWorldId && selectedWV && fetchEntries(selectedWorldId, selectedWV, searchQuery, entryPage, entryPageSize)}
             sx={{ color: 'rgba(255,255,255,0.5)' }}
           >
             <RefreshIcon />
@@ -573,6 +734,10 @@ export const LoreDB: React.FC = () => {
             </Box>
           ) : !selectedWorldId ? (
             <Alert severity="warning">必须选择世界后才能查看世界观内容。</Alert>
+          ) : worldviews.length > 1 ? (
+            <Alert severity="error">当前世界存在多个世界观设定集，/worldviews 只能管理唯一设定集下的设定条目，请先清理脏数据。</Alert>
+          ) : !selectedWV ? (
+            <Alert severity="warning">当前世界缺少唯一世界观设定库，无法加载设定条目。</Alert>
           ) : viewMode === 'tree' ? (
             <Paper className="glass-panel" sx={{ borderRadius: '18px', overflow: 'hidden' }}>
               <Box sx={{ px: 2, py: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
@@ -580,7 +745,7 @@ export const LoreDB: React.FC = () => {
                   <TreeIcon sx={{ color: 'primary.main' }} />
                   <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>层级树视图</Typography>
                 </Box>
-                <Chip label={`${entries.length} 条`} size="small" />
+                <Chip label={`第 ${entryPage} 页 / 当前 ${entries.length} 条`} size="small" />
               </Box>
               <List dense sx={{ p: 1.5 }}>
                 {entries.length > 0 ? renderTreeNode(loreTree) : (
@@ -647,6 +812,28 @@ export const LoreDB: React.FC = () => {
                             <EditIcon sx={{ fontSize: 17 }} />
                           </IconButton>
                         </Tooltip>
+                        <Tooltip title="新增同级设定">
+                          <IconButton
+                            size="small"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              createSiblingEntry(entry);
+                            }}
+                          >
+                            <AddSiblingIcon sx={{ fontSize: 17 }} />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="新增子设定">
+                          <IconButton
+                            size="small"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              createChildUnderEntry(entry);
+                            }}
+                          >
+                            <AddChildIcon sx={{ fontSize: 17 }} />
+                          </IconButton>
+                        </Tooltip>
                         <Tooltip title="删除">
                           <IconButton
                             size="small"
@@ -674,107 +861,42 @@ export const LoreDB: React.FC = () => {
             </TableContainer>
           )}
         </Box>
+        <Paper className="glass-panel" sx={{ borderRadius: '18px', p: 1.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+            <Typography variant="caption" sx={{ opacity: 0.72 }}>
+              /worldviews 会分页读取当前世界唯一设定库下的世界观设定；支持 md、json、xml、opml 导入并保留层级路径；树节点支持“在此节点下新增”，设定条目支持“新增同级/新增子设定”，当前第 {entryPage} 页，每页 {entryPageSize} 条。
+            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <FormControl size="small" sx={{ minWidth: 110 }}>
+                <InputLabel id="lore-page-size-label">每页条数</InputLabel>
+                <Select
+                  labelId="lore-page-size-label"
+                  label="每页条数"
+                  value={String(entryPageSize)}
+                  onChange={(event) => {
+                    setEntryPage(1);
+                    setEntryPageSize(Number(event.target.value));
+                  }}
+                >
+                  {[10, 20, 50].map((size) => (
+                    <MenuItem key={size} value={String(size)}>
+                      {size}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Button variant="outlined" disabled={entryPage <= 1 || loading} onClick={() => setEntryPage((current) => Math.max(1, current - 1))}>
+                上一页
+              </Button>
+              <Button variant="outlined" disabled={!hasMoreEntries || loading || !selectedWV || worldviews.length !== 1} onClick={() => setEntryPage((current) => current + 1)}>
+                下一页
+              </Button>
+            </Box>
+          </Box>
+        </Paper>
       </Box>
 
       {/* --- Modals --- */}
-
-      {/* New Worldview Modal */}
-      <Dialog 
-        open={isWVModalOpen} 
-        onClose={() => setIsWVModalOpen(false)}
-        PaperProps={{ className: 'glass-panel', sx: { borderRadius: '20px', minWidth: 400 } }}
-      >
-        <DialogTitle sx={{ fontWeight: 800 }}>新建星际世界观</DialogTitle>
-        <DialogContent>
-          <Stack spacing={3} sx={{ mt: 1 }}>
-            <TextField
-              label="所属世界"
-              fullWidth
-              value={worlds.find((world) => world.world_id === selectedWorldId)?.name || selectedWorldId}
-              InputProps={{ readOnly: true }}
-              required
-            />
-            <TextField
-              label="世界观名称"
-              fullWidth
-              value={newWV.name}
-              onChange={(e) => setNewWV({ ...newWV, name: e.target.value })}
-            />
-            <TextField
-              label="核心简述"
-              fullWidth
-              multiline
-              rows={3}
-              value={newWV.summary}
-              onChange={(e) => setNewWV({ ...newWV, summary: e.target.value })}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions sx={{ p: 3 }}>
-          <Button onClick={() => setIsWVModalOpen(false)} sx={{ color: 'text.secondary' }}>取消</Button>
-          <Button onClick={handleCreateWorldview} variant="contained" sx={{ borderRadius: '10px' }}>确认部署</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Edit Entry Modal */}
-      <Dialog 
-        open={isEntryModalOpen} 
-        onClose={() => setIsEntryModalOpen(false)}
-        maxWidth="md"
-        fullWidth
-        PaperProps={{ className: 'glass-panel', sx: { borderRadius: '24px' } }}
-      >
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1.5, fontWeight: 800 }}>
-          <MagicIcon sx={{ color: 'primary.main' }} />
-          {editingEntry?.id ? '编辑设定条目' : '新增设定条目'}
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={3} sx={{ mt: 1 }}>
-            <Grid container spacing={2}>
-              <Grid item xs={8}>
-                <TextField
-                  label="条目名称 / 实体名"
-                  fullWidth
-                  value={editingEntry?.name || ''}
-                  onChange={(e) => setEditingEntry({ ...editingEntry, name: e.target.value })}
-                />
-              </Grid>
-              <Grid item xs={4}>
-                <TextField
-                  label="分类"
-                  fullWidth
-                  value={editingEntry?.category || ''}
-                  onChange={(e) => setEditingEntry({ ...editingEntry, category: e.target.value })}
-                />
-              </Grid>
-            </Grid>
-            <TextField
-              label="设定详细内容"
-              fullWidth
-              multiline
-              rows={12}
-              value={editingEntry?.content || ''}
-              onChange={(e) => setEditingEntry({ ...editingEntry, content: e.target.value })}
-              sx={{ 
-                '& .MuiInputBase-root': { fontFamily: 'monospace', fontSize: '0.9rem' }
-              }}
-            />
-            <Typography variant="caption" sx={{ opacity: 0.5 }}>
-              * 物理引擎会自动执行向量化索引，同步至 ChromaDB 以供 Agent 检索。
-            </Typography>
-          </Stack>
-        </DialogContent>
-        <DialogActions sx={{ p: 3 }}>
-          <Button onClick={() => setIsEntryModalOpen(false)} sx={{ color: 'text.secondary' }}>舍弃修改</Button>
-          <Button onClick={handleSaveEntry} variant="contained" sx={{ 
-            borderRadius: '12px', 
-            background: 'linear-gradient(90deg, #00bcd4, #9c27b0)',
-            px: 4
-          }}>
-            同步物理库
-          </Button>
-        </DialogActions>
-      </Dialog>
 
     </Box>
   );

@@ -1,6 +1,7 @@
 LLM_PROVIDER: ollama
 DEFAULT_MODEL: gemma4:e2b
 OLLAMA_BASE_URL: http://localhost:11434/v1
+REVIEW_AGENT_TIMEOUT: 180
 
 DEFAULT_MODEL_MAP:
   gemini: gemma-4-31b-it
@@ -32,9 +33,33 @@ AGENT_MODELS:
   comment: 如果需要特定 Agent 使用不同模型，请在此配置。留空则使用 DEFAULT_MODEL
   world_agent: {}
   worldview_agent: {}
+  worldview_agent_initial_expansion: {}
+  worldview_agent_modify_content: {}
   novel_agent: {}
   outline_agent: {}
+  outline_agent_initial_expansion: {}
+  outline_agent_modify_content: {}
   chapter_agent: {}
+  chapter_agent_initial_expansion: {}
+  chapter_agent_modify_content: {}
+  outline_summary_create_agent: {}
+  outline_summary_create_llm: {}
+  outline_summary_create_modify_llm: {}
+  outline_summary_update_agent: {}
+  outline_summary_update_llm: {}
+  outline_summary_update_modify_llm: {}
+  chapter_outline_summary_create_agent: {}
+  chapter_outline_summary_create_llm: {}
+  chapter_outline_summary_create_modify_llm: {}
+  chapter_outline_summary_update_agent: {}
+  chapter_outline_summary_update_llm: {}
+  chapter_outline_summary_update_modify_llm: {}
+  chapter_content_summary_create_agent: {}
+  chapter_content_summary_create_llm: {}
+  chapter_content_summary_create_modify_llm: {}
+  chapter_content_summary_update_agent: {}
+  chapter_content_summary_update_llm: {}
+  chapter_content_summary_update_modify_llm: {}
   world_review_agent: {}
   worldview_review_agent: {}
   novel_review_agent: {}

@@ -112,9 +112,9 @@ def approve(run_id: str) -> dict[str, Any]:
     run = data["run"]
     assert run["status"] == "completed", run
     assert run["committed"] is True, run
-    assert run["current_node"] == "apply", run
+    assert run["current_node"] in {"apply", "commit"}, run
     assert run.get("commit_result"), run
-    assert any(node["node_id"] == "apply" for node in run["nodes"]), run
+    assert any(node["node_id"] in {"apply", "commit"} for node in run["nodes"]), run
     return run
 
 
@@ -156,6 +156,7 @@ def main() -> None:
     suffix = str(int(time.time()))
     world_id = f"world_agent_workflow_{suffix}"
     worldview_id = ""
+    worldview_entry_id = ""
     novel_id = ""
     outline_id = ""
     chapter_id = ""
@@ -196,9 +197,12 @@ def main() -> None:
         assert world["summary"] == run["commit_result"]["summary"]
         assert world["summary"] == run["pending_payload"]["summary"]
         assert world["summary"] != world_original_summary
+        worldview_libraries = request_json("GET", "/api/worldviews/list", params={"world_id": world_id, "page": 1, "page_size": 10})
+        assert len(worldview_libraries) == 1, worldview_libraries
+        worldview_id = worldview_libraries[0]["worldview_id"]
 
         updated_world_name = f"Workflow World Updated {suffix}"
-        run_change(
+        run = run_change(
             "world",
             "update",
             {"target_id": world_id, "name": updated_world_name, "summary": "world update initial"},
@@ -207,32 +211,33 @@ def main() -> None:
         )
         world = find_one("/api/worlds/list", "world_id", world_id, params={})
         assert world["name"] == updated_world_name
-        assert world["summary"] == "world update final"
+        assert world["summary"] == run["pending_payload"]["summary"]
 
         # worldview create/update
         run = run_change(
             "worldview",
             "create",
-            {"world_id": world_id, "name": f"Workflow Worldview {suffix}", "summary": worldview_summary},
+            {"world_id": world_id, "worldview_id": worldview_id, "name": f"Workflow Worldview {suffix}", "summary": worldview_summary},
             "创建测试世界观",
         )
         assert_llm_expanded(run, "summary", worldview_summary)
-        worldview_id = run["commit_result"]["worldview_id"]
-        worldview = find_one("/api/worldviews/list", "worldview_id", worldview_id, {"world_id": world_id, "page": 1, "page_size": 50})
-        assert worldview["world_id"] == world_id
-        assert worldview["summary"] == run["pending_payload"]["summary"]
+        worldview_entry_id = run["commit_result"]["id"]
+        worldview_entry = find_one("/api/lore/list", "id", worldview_entry_id, {"world_id": world_id, "worldview_id": worldview_id, "page": 1, "page_size": 50})
+        assert worldview_entry["world_id"] == world_id
+        assert worldview_entry["worldview_id"] == worldview_id
+        assert worldview_entry["content"] == run["pending_payload"]["summary"]
 
         updated_worldview_name = f"Workflow Worldview Updated {suffix}"
-        run_change(
+        run = run_change(
             "worldview",
             "update",
-            {"target_id": worldview_id, "name": updated_worldview_name, "summary": worldview_summary},
+            {"target_id": worldview_entry_id, "world_id": world_id, "worldview_id": worldview_id, "name": updated_worldview_name, "summary": worldview_summary},
             "修改测试世界观",
-            {"target_id": worldview_id, "name": updated_worldview_name, "summary": worldview_summary_final},
+            {"target_id": worldview_entry_id, "world_id": world_id, "worldview_id": worldview_id, "name": updated_worldview_name, "summary": worldview_summary_final},
         )
-        worldview = find_one("/api/worldviews/list", "worldview_id", worldview_id, {"worldview_id": worldview_id, "page": 1, "page_size": 10})
-        assert worldview["name"] == updated_worldview_name
-        assert worldview["summary"] == worldview_summary_final
+        worldview_entry = find_one("/api/lore/list", "id", worldview_entry_id, {"world_id": world_id, "worldview_id": worldview_id, "page": 1, "page_size": 50})
+        assert worldview_entry["name"] == updated_worldview_name
+        assert worldview_entry["content"] == run["pending_payload"]["summary"]
 
         # novel create/update
         run = run_change(
@@ -248,7 +253,7 @@ def main() -> None:
         assert novel["summary"] == run["pending_payload"]["summary"]
 
         updated_novel_name = f"Workflow Novel Updated {suffix}"
-        run_change(
+        run = run_change(
             "novel",
             "update",
             {"target_id": novel_id, "name": updated_novel_name, "summary": novel_summary},
@@ -257,7 +262,7 @@ def main() -> None:
         )
         novel = find_one("/api/novels/list", "novel_id", novel_id, {"novel_id": novel_id, "page": 1, "page_size": 10})
         assert novel["name"] == updated_novel_name
-        assert novel["summary"] == novel_summary_final
+        assert novel["summary"] == run["pending_payload"]["summary"]
 
         # outline create/update
         run = run_change(
@@ -279,7 +284,7 @@ def main() -> None:
         assert outline["summary"] == run["pending_payload"]["summary"]
 
         updated_outline_name = f"Workflow Outline Updated {suffix}"
-        run_change(
+        run = run_change(
             "outline",
             "update",
             {"target_id": outline_id, "name": updated_outline_name, "summary": outline_summary},
@@ -288,7 +293,7 @@ def main() -> None:
         )
         outline = find_one("/api/outlines/list", "outline_id", outline_id, {"outline_id": outline_id, "page": 1, "page_size": 10})
         assert outline["title"] == updated_outline_name
-        assert outline["summary"] == outline_summary_final
+        assert outline["summary"] == run["pending_payload"]["summary"]
 
         # chapter create/update
         run = run_change(
@@ -311,7 +316,7 @@ def main() -> None:
         assert chapter["content"] == run["pending_payload"]["content"]
 
         updated_chapter_name = f"Workflow Chapter Updated {suffix}"
-        run_change(
+        run = run_change(
             "chapter",
             "update",
             {"target_id": chapter_id, "name": updated_chapter_name, "content": chapter_content},
@@ -320,7 +325,7 @@ def main() -> None:
         )
         chapter = find_one("/api/lore/list", "id", chapter_id, {"world_id": world_id, "outline_id": outline_id, "page": 1, "page_size": 50})
         assert chapter["name"] == updated_chapter_name
-        assert chapter["content"] == chapter_content_final
+        assert chapter["content"] == run["pending_payload"]["content"]
 
         print("five module workflow create/update real requests test passed")
     finally:

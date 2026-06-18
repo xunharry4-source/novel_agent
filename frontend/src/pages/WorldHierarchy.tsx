@@ -41,6 +41,7 @@ import {
   IconWorld,
 } from '@tabler/icons-react';
 import { api } from '../api/client';
+import { getWorldviewDisplayName } from '../utils/worldview';
 
 type NodeKind = 'root' | 'world' | 'worldview' | 'novel' | 'outline' | 'chapter';
 type AgentAction = 'create' | 'update' | 'delete';
@@ -77,7 +78,8 @@ type NovelNode = {
 type WorldviewNode = {
   worldview_id: string;
   world_id: string;
-  name: string;
+  name?: string;
+  title?: string;
   summary?: string;
 };
 
@@ -522,7 +524,7 @@ export const WorldHierarchy: React.FC = () => {
                     <Select
                       label="关联世界观"
                       clearable
-                      data={(owningWorld?.worldviews || []).map((worldview) => ({ value: worldview.worldview_id, label: `${worldview.name} (${worldview.worldview_id})` }))}
+                      data={(owningWorld?.worldviews || []).map((worldview) => ({ value: worldview.worldview_id, label: getWorldviewDisplayName(worldview) }))}
                       value={agentForm.worldviewId || null}
                       onChange={(value) => setAgentForm({ ...agentForm, worldviewId: value || '' })}
                     />

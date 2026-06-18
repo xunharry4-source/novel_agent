@@ -8,9 +8,13 @@ existing agent node functions directly for hierarchy workflows.
 from __future__ import annotations
 
 import copy
+import json
 import os
+import re
 import secrets
+import tempfile
 import uuid
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -20,7 +24,21 @@ from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from src.agents import chapter_agent, novel_agent, outline_agent, worldview_agent, world_agent
+from src.agents import (
+    chapter_agent,
+    chapter_check_agent,
+    chapter_content_summary_create_agent,
+    chapter_content_summary_update_agent,
+    chapter_outline_summary_create_agent,
+    chapter_outline_summary_update_agent,
+    novel_agent,
+    outline_agent,
+    outline_summary_create_agent,
+    outline_summary_update_agent,
+    review_agent,
+    worldview_agent,
+    world_agent,
+)
 from src.common.lore_utils import get_mongodb_db
 
 
@@ -34,6 +52,12 @@ AGENT_MODULES = {
     "novel": novel_agent,
     "outline": outline_agent,
     "chapter": chapter_agent,
+    "outline_summary_create": outline_summary_create_agent,
+    "outline_summary_update": outline_summary_update_agent,
+    "chapter_outline_summary_create": chapter_outline_summary_create_agent,
+    "chapter_outline_summary_update": chapter_outline_summary_update_agent,
+    "chapter_content_summary_create": chapter_content_summary_create_agent,
+    "chapter_content_summary_update": chapter_content_summary_update_agent,
 }
 
 AGENT_CAPABILITIES = {
@@ -46,9 +70,9 @@ AGENT_CAPABILITIES = {
     },
     "worldview": {
         "label": "世界观 Agent",
-        "description": "创建或修改世界下的世界观容器与世界观设定。",
+        "description": "创建或修改当前世界唯一设定库下的世界观设定条目。",
         "required_context": ["world_id"],
-        "id_fields": ["worldview_id", "target_id"],
+        "id_fields": ["id", "worldview_id", "target_id"],
         "content_fields": ["name", "summary", "forbidden_rules", "basic_settings"],
     },
     "novel": {
@@ -70,7 +94,49 @@ AGENT_CAPABILITIES = {
         "description": "创建或修改大纲下的章节正文，并执行全链路约束审查。",
         "required_context": ["outline_id"],
         "id_fields": ["chapter_id", "scene_id", "prose_id", "id", "target_id"],
-        "content_fields": ["name", "content"],
+        "content_fields": ["name", "content", "chapter_outline"],
+    },
+    "outline_summary_create": {
+        "label": "新增分卷大纲总结工作流",
+        "description": "把新增分卷大纲压缩成下游摘要，单独写入 downstream_summaries。",
+        "required_context": ["novel_id"],
+        "id_fields": ["outline_id", "target_id"],
+        "content_fields": ["name", "summary", "downstream_summary"],
+    },
+    "outline_summary_update": {
+        "label": "修改分卷大纲总结工作流",
+        "description": "把修改后的分卷大纲压缩成下游摘要，单独写入 downstream_summaries。",
+        "required_context": ["novel_id"],
+        "id_fields": ["outline_id", "target_id"],
+        "content_fields": ["name", "summary", "downstream_summary"],
+    },
+    "chapter_outline_summary_create": {
+        "label": "新增章节大纲总结工作流",
+        "description": "把章节大纲压缩成下游摘要，单独写入 downstream_summaries。",
+        "required_context": ["outline_id"],
+        "id_fields": ["chapter_id", "id", "scene_id", "target_id"],
+        "content_fields": ["name", "content", "downstream_summary"],
+    },
+    "chapter_outline_summary_update": {
+        "label": "修改章节大纲总结工作流",
+        "description": "把修改后的章节大纲压缩成下游摘要，单独写入 downstream_summaries。",
+        "required_context": ["outline_id"],
+        "id_fields": ["chapter_id", "id", "scene_id", "target_id"],
+        "content_fields": ["name", "content", "downstream_summary"],
+    },
+    "chapter_content_summary_create": {
+        "label": "新增章节内容总结工作流",
+        "description": "把章节正文压缩成下游摘要，单独写入 downstream_summaries。",
+        "required_context": ["outline_id"],
+        "id_fields": ["chapter_id", "id", "scene_id", "target_id"],
+        "content_fields": ["name", "content", "downstream_summary"],
+    },
+    "chapter_content_summary_update": {
+        "label": "修改章节内容总结工作流",
+        "description": "把修改后的章节正文压缩成下游摘要，单独写入 downstream_summaries。",
+        "required_context": ["outline_id"],
+        "id_fields": ["chapter_id", "id", "scene_id", "target_id"],
+        "content_fields": ["name", "content", "downstream_summary"],
     },
 }
 
@@ -92,6 +158,12 @@ AGENT_ALIASES = {
     "chapter_agent": "chapter",
     "章节": "chapter",
     "正文": "chapter",
+    "outline_summary_create": "outline_summary_create",
+    "outline_summary_update": "outline_summary_update",
+    "chapter_outline_summary_create": "chapter_outline_summary_create",
+    "chapter_outline_summary_update": "chapter_outline_summary_update",
+    "chapter_content_summary_create": "chapter_content_summary_create",
+    "chapter_content_summary_update": "chapter_content_summary_update",
 }
 
 ACTION_ALIASES = {
@@ -105,6 +177,11 @@ ACTION_ALIASES = {
     "edit": "update",
     "修改": "update",
     "更新": "update",
+    "check": "check",
+    "review": "check",
+    "inspect": "check",
+    "检查": "check",
+    "审查": "check",
 }
 
 AGENT_KEYWORDS = [
@@ -147,6 +224,35 @@ def _db():
 
 def _find_one(collection: str, query: dict[str, Any]) -> dict[str, Any] | None:
     return _db()[collection].find_one(query)
+
+
+def _find_worldview_by_world(world_id: str, *, exclude_worldview_id: str | None = None) -> dict[str, Any] | None:
+    query: dict[str, Any] = {"world_id": world_id}
+    if exclude_worldview_id:
+        query["worldview_id"] = {"$ne": exclude_worldview_id}
+    return _db()["worldviews"].find_one(query)
+
+
+def _ensure_worldview_library(world_id: str) -> dict[str, Any]:
+    worldview = _find_worldview_by_world(world_id)
+    if worldview:
+        return worldview
+    world = _find_one("worlds", {"world_id": world_id})
+    if not world:
+        raise ValueError(f"Parent world not found for worldview library: {world_id}")
+    worldview = {
+        "worldview_id": f"wv_{world_id}",
+        "world_id": world_id,
+        "name": f"{world.get('name', world_id)} 世界观设定集",
+        "summary": world.get("summary", ""),
+        "forbidden_rules": [],
+        "basic_settings": {},
+        "auto_created": True,
+        "created_at": _now(),
+        "updated_at": _now(),
+    }
+    _db()["worldviews"].insert_one(worldview)
+    return worldview
 
 
 def _require(value: Any, message: str) -> Any:
@@ -225,6 +331,183 @@ def _list_collection(collection: str, query: dict[str, Any], *, sort_field: str 
     return items
 
 
+def _normalize_hierarchy_path(path: str) -> list[str]:
+    parts = [part.strip() for part in str(path).replace("/", ">").split(">") if part.strip()]
+    return parts
+
+
+def _parse_markdown_worldview_entries(text: str) -> list[dict[str, str]]:
+    pattern = re.compile(r"^(#{1,6})\s+(.*)$")
+    stack: list[str] = []
+    current_title: str | None = None
+    current_level = 0
+    current_lines: list[str] = []
+    entries: list[dict[str, str]] = []
+
+    def flush_current() -> None:
+        nonlocal current_title, current_level, current_lines
+        if not current_title:
+            return
+        content = "\n".join(current_lines).strip()
+        if content:
+            path = " > ".join(stack[:current_level])
+            entries.append({"name": current_title, "path": path, "content": content})
+        current_lines = []
+
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        match = pattern.match(line)
+        if match:
+            flush_current()
+            level = len(match.group(1))
+            title = match.group(2).strip()
+            stack = stack[: level - 1]
+            stack.append(title)
+            current_title = title
+            current_level = level
+            current_lines = []
+            continue
+        if current_title:
+            current_lines.append(line)
+    flush_current()
+    return entries
+
+
+def _parse_json_worldview_entries(payload: Any) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+
+    def walk(node: Any, path_stack: list[str]) -> None:
+        if isinstance(node, list):
+            for item in node:
+                walk(item, path_stack)
+            return
+        if isinstance(node, dict):
+            label = str(node.get("name") or node.get("title") or node.get("label") or node.get("text") or "").strip()
+            next_stack = path_stack + ([label] if label else [])
+            content = node.get("content")
+            if content is None:
+                content = node.get("summary")
+            if isinstance(content, (dict, list)):
+                content = json.dumps(content, ensure_ascii=False, indent=2)
+            if label and isinstance(content, str) and content.strip():
+                entries.append({"name": label, "path": " > ".join(next_stack), "content": content.strip()})
+            children = node.get("children")
+            if isinstance(children, list):
+                for child in children:
+                    walk(child, next_stack)
+                return
+            for key, value in node.items():
+                if key in {"name", "title", "label", "text", "content", "summary", "children"}:
+                    continue
+                if isinstance(value, (dict, list)):
+                    key_stack = next_stack + ([str(key)] if not label else [])
+                    walk(value, key_stack)
+            return
+        if path_stack and isinstance(node, str) and node.strip():
+            entries.append({"name": path_stack[-1], "path": " > ".join(path_stack), "content": node.strip()})
+
+    walk(payload, [])
+    return entries
+
+
+def _parse_opml_worldview_entries(root: ET.Element) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    body = root.find("body")
+    if body is None:
+        return entries
+
+    def walk(node: ET.Element, path_stack: list[str]) -> None:
+        label = (node.get("text") or node.get("title") or node.get("name") or "").strip()
+        next_stack = path_stack + ([label] if label else [])
+        children = [child for child in list(node) if child.tag.lower().endswith("outline")]
+
+        note_parts = []
+        for attr_name in ("_note", "note", "content", "summary", "description"):
+            attr_value = node.get(attr_name)
+            if attr_value and attr_value.strip():
+                note_parts.append(attr_value.strip())
+
+        leaf_child_texts = []
+        branch_children: list[ET.Element] = []
+        for child in children:
+            child_label = (child.get("text") or child.get("title") or child.get("name") or "").strip()
+            grand_children = [grand for grand in list(child) if grand.tag.lower().endswith("outline")]
+            child_note = ""
+            for attr_name in ("_note", "note", "content", "summary", "description"):
+                attr_value = child.get(attr_name)
+                if attr_value and attr_value.strip():
+                    child_note = attr_value.strip()
+                    break
+            if grand_children:
+                branch_children.append(child)
+                continue
+            if child_note:
+                if child_label:
+                    child_path = " > ".join(next_stack + [child_label])
+                    entries.append({"name": child_label, "path": child_path, "content": child_note})
+                else:
+                    leaf_child_texts.append(child_note)
+            elif child_label:
+                leaf_child_texts.append(child_label)
+
+        content_parts = note_parts + leaf_child_texts
+        if label and content_parts:
+            entries.append({"name": label, "path": " > ".join(next_stack), "content": "\n".join(content_parts).strip()})
+
+        if label and not children and not content_parts:
+            entries.append({"name": label, "path": " > ".join(next_stack), "content": label})
+        for child in branch_children:
+            walk(child, next_stack)
+
+    for outline in body:
+        walk(outline, [])
+    return entries
+
+
+def _parse_xml_worldview_entries(root: ET.Element) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+
+    def walk(node: ET.Element, path_stack: list[str]) -> None:
+        label = (node.get("name") or node.get("title") or node.get("label") or node.get("text") or node.tag).strip()
+        next_stack = path_stack + [label]
+        text_parts = []
+        if node.text and node.text.strip():
+            text_parts.append(node.text.strip())
+        for attr_name in ("content", "summary", "note", "description", "value"):
+            attr_value = node.get(attr_name)
+            if attr_value and attr_value.strip():
+                text_parts.append(attr_value.strip())
+        text_content = "\n".join(text_parts).strip()
+        children = list(node)
+        if text_content:
+            entries.append({"name": label, "path": " > ".join(next_stack), "content": text_content})
+        for child in children:
+            walk(child, next_stack)
+
+    walk(root, [])
+    return entries
+
+
+def _parse_worldview_import_file(file_path: str, filename: str) -> list[dict[str, str]]:
+    ext = os.path.splitext(filename)[1].lower()
+    if ext in {".md", ".markdown"}:
+        with open(file_path, "r", encoding="utf-8") as handle:
+            return _parse_markdown_worldview_entries(handle.read())
+    if ext == ".json":
+        with open(file_path, "r", encoding="utf-8") as handle:
+            return _parse_json_worldview_entries(json.load(handle))
+    if ext == ".opml":
+        tree = ET.parse(file_path)
+        return _parse_opml_worldview_entries(tree.getroot())
+    if ext == ".xml":
+        tree = ET.parse(file_path)
+        root = tree.getroot()
+        if root.tag.lower().endswith("opml"):
+            return _parse_opml_worldview_entries(root)
+        return _parse_xml_worldview_entries(root)
+    raise ValueError(f"Unsupported worldview import format: {ext}")
+
+
 def _resolve_novel_context(payload: dict[str, Any]) -> dict[str, Any]:
     novel_id = payload.get("novel_id")
     if novel_id:
@@ -245,9 +528,15 @@ def _resolve_outline_context(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _enrich_payload(agent_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     payload = dict(payload or {})
-    if agent_type == "outline":
+    if agent_type in {"outline", "outline_summary_create", "outline_summary_update"}:
         _resolve_novel_context(payload)
-    if agent_type == "chapter":
+    if agent_type in {
+        "chapter",
+        "chapter_outline_summary_create",
+        "chapter_outline_summary_update",
+        "chapter_content_summary_create",
+        "chapter_content_summary_update",
+    }:
         _resolve_outline_context(payload)
         _resolve_novel_context(payload)
     if agent_type == "worldview" and payload.get("target_id"):
@@ -286,6 +575,12 @@ def _run_until_human(agent_type: str, action: str, payload: dict[str, Any], mess
         "novel": ["review_node"],
         "outline": ["world_review_node", "worldview_review_node", "novel_review_node"],
         "chapter": ["world_review_node", "worldview_review_node", "novel_review_node", "outline_review_node", "chapter_review_node"],
+        "outline_summary_create": ["review_node"],
+        "outline_summary_update": ["review_node"],
+        "chapter_outline_summary_create": ["review_node"],
+        "chapter_outline_summary_update": ["review_node"],
+        "chapter_content_summary_create": ["review_node"],
+        "chapter_content_summary_update": ["review_node"],
     }
     for node_name in review_sequences[agent_type]:
         _run_node(module, node_name, state)
@@ -309,11 +604,163 @@ def _save_run(run: dict[str, Any]) -> dict[str, Any]:
     return _clean(run)
 
 
+def _rebuild_node_prompt(run: dict[str, Any], node: dict[str, Any]) -> str:
+    module = AGENT_MODULES.get(run.get("agent_type"))
+    if not module:
+        return ""
+
+    node_id = str(node.get("node_id") or "")
+    node_input = node.get("input") if isinstance(node.get("input"), dict) else {}
+    payload = node_input.get("payload") if isinstance(node_input.get("payload"), dict) else {}
+    message = str(run.get("message") or "")
+    revision_mode = node_input.get("revision_mode")
+    feedback = str(node_input.get("feedback") or "")
+
+    if node_id == "initial_expansion" and hasattr(module, "build_initial_expansion_prompt"):
+        return module.build_initial_expansion_prompt(run.get("action", "create"), payload, message, revision_mode=revision_mode, feedback=feedback)
+    if node_id == "modify_content" and hasattr(module, "build_modification_prompt"):
+        return module.build_modification_prompt(run.get("action", "create"), payload, message, revision_mode=revision_mode, feedback=feedback, expansion_error=feedback)
+
+    review_entity_type_map = {
+        "world_rule_review": "worldview_world_rules",
+        "worldview_consistency_review": "worldview_consistency",
+        "review": "novel_world_rules",
+        "world_review": {
+            "outline": "outline_world_rules",
+            "chapter": "chapter_world_rules",
+        },
+        "worldview_review": {
+            "outline": "outline_worldview_rules",
+            "chapter": "chapter_worldview_rules",
+        },
+        "novel_review": {
+            "outline": "outline_novel_rules",
+            "chapter": "chapter_novel_rules",
+        },
+        "outline_review": "chapter_outline_rules",
+        "chapter_review": "chapter_consistency",
+        "chapter_outline_review": "chapter_chapter_outline_rules",
+        "plot_review": "chapter_plot_errors",
+    }
+    entity_type = review_entity_type_map.get(node_id)
+    if isinstance(entity_type, dict):
+        entity_type = entity_type.get(run.get("agent_type"))
+    if isinstance(entity_type, str) and payload:
+        system_prompt, user_message = review_agent.build_review_messages(_db(), entity_type, payload)
+        return f"[System]\n{system_prompt}\n\n[User]\n{user_message}"
+
+    return ""
+
+
+def _expected_llm_agent_name(run: dict[str, Any], node_id: str) -> str:
+    if run.get("agent_type") == "worldview":
+        if node_id == "initial_expansion":
+            return getattr(worldview_agent, "INITIAL_EXPANSION_AGENT_NAME", "worldview_agent_initial_expansion")
+        if node_id == "modify_content":
+            return getattr(worldview_agent, "MODIFY_CONTENT_AGENT_NAME", "worldview_agent_modify_content")
+    if run.get("agent_type") == "outline":
+        if node_id == "initial_expansion":
+            return getattr(outline_agent, "INITIAL_EXPANSION_AGENT_NAME", "outline_agent_initial_expansion")
+        if node_id == "modify_content":
+            return getattr(outline_agent, "MODIFY_CONTENT_AGENT_NAME", "outline_agent_modify_content")
+    if run.get("agent_type") == "chapter":
+        if node_id == "initial_expansion":
+            return getattr(chapter_agent, "INITIAL_EXPANSION_AGENT_NAME", "chapter_agent_initial_expansion")
+        if node_id == "modify_content":
+            return getattr(chapter_agent, "MODIFY_CONTENT_AGENT_NAME", "chapter_agent_modify_content")
+    if run.get("agent_type") == "outline_summary_create":
+        if node_id == "initial_expansion":
+            return getattr(outline_summary_create_agent, "INITIAL_EXPANSION_AGENT_NAME", "outline_summary_create_llm")
+        if node_id == "modify_content":
+            return getattr(outline_summary_create_agent, "MODIFY_CONTENT_AGENT_NAME", "outline_summary_create_modify_llm")
+    if run.get("agent_type") == "outline_summary_update":
+        if node_id == "initial_expansion":
+            return getattr(outline_summary_update_agent, "INITIAL_EXPANSION_AGENT_NAME", "outline_summary_update_llm")
+        if node_id == "modify_content":
+            return getattr(outline_summary_update_agent, "MODIFY_CONTENT_AGENT_NAME", "outline_summary_update_modify_llm")
+    if run.get("agent_type") == "chapter_outline_summary_create":
+        if node_id == "initial_expansion":
+            return getattr(chapter_outline_summary_create_agent, "INITIAL_EXPANSION_AGENT_NAME", "chapter_outline_summary_create_llm")
+        if node_id == "modify_content":
+            return getattr(chapter_outline_summary_create_agent, "MODIFY_CONTENT_AGENT_NAME", "chapter_outline_summary_create_modify_llm")
+    if run.get("agent_type") == "chapter_outline_summary_update":
+        if node_id == "initial_expansion":
+            return getattr(chapter_outline_summary_update_agent, "INITIAL_EXPANSION_AGENT_NAME", "chapter_outline_summary_update_llm")
+        if node_id == "modify_content":
+            return getattr(chapter_outline_summary_update_agent, "MODIFY_CONTENT_AGENT_NAME", "chapter_outline_summary_update_modify_llm")
+    if run.get("agent_type") == "chapter_content_summary_create":
+        if node_id == "initial_expansion":
+            return getattr(chapter_content_summary_create_agent, "INITIAL_EXPANSION_AGENT_NAME", "chapter_content_summary_create_llm")
+        if node_id == "modify_content":
+            return getattr(chapter_content_summary_create_agent, "MODIFY_CONTENT_AGENT_NAME", "chapter_content_summary_create_modify_llm")
+    if run.get("agent_type") == "chapter_content_summary_update":
+        if node_id == "initial_expansion":
+            return getattr(chapter_content_summary_update_agent, "INITIAL_EXPANSION_AGENT_NAME", "chapter_content_summary_update_llm")
+        if node_id == "modify_content":
+            return getattr(chapter_content_summary_update_agent, "MODIFY_CONTENT_AGENT_NAME", "chapter_content_summary_update_modify_llm")
+    return ""
+
+
+def _is_llm_node(node_id: str) -> bool:
+    return node_id in {
+        "initial_expansion",
+        "modify_content",
+        "world_rule_review",
+        "worldview_consistency_review",
+        "review",
+        "world_review",
+        "worldview_review",
+        "novel_review",
+        "outline_review",
+        "chapter_review",
+        "chapter_outline_review",
+        "plot_review",
+    }
+
+
+def _hydrate_run_prompts(run: dict[str, Any]) -> dict[str, Any]:
+    hydrated = copy.deepcopy(run)
+    nodes = []
+    for node in hydrated.get("nodes") or []:
+        next_node = copy.deepcopy(node)
+        output = copy.deepcopy(next_node.get("output")) if isinstance(next_node.get("output"), dict) else {}
+        llm_call = output.get("llm_call") if isinstance(output.get("llm_call"), dict) else {}
+        node_id = str(next_node.get("node_id") or "")
+        expected_llm_agent_name = _expected_llm_agent_name(hydrated, node_id)
+        if _is_llm_node(node_id) and "llm_invoked" not in output:
+            output["llm_invoked"] = True
+        if expected_llm_agent_name:
+            if output.get("agent_name") in {"", None, "worldview_agent", "outline_agent", "chapter_agent"}:
+                output["agent_name"] = expected_llm_agent_name
+            if output.get("llm_agent_name") in {"", None, "worldview_agent", "outline_agent", "chapter_agent"}:
+                output["llm_agent_name"] = expected_llm_agent_name
+            if llm_call.get("llm_agent_name") in {"", None, "worldview_agent", "outline_agent", "chapter_agent"}:
+                llm_call["llm_agent_name"] = expected_llm_agent_name
+        if output.get("llm_invoked") and not llm_call.get("prompt"):
+            prompt = _rebuild_node_prompt(hydrated, next_node)
+            if prompt:
+                llm_call["prompt"] = prompt
+                llm_call["prompt_chars"] = len(prompt)
+        if llm_call:
+            output["llm_call"] = llm_call
+        next_node["output"] = output
+        nodes.append(next_node)
+    hydrated["nodes"] = nodes
+    return hydrated
+
+
 def _load_run(run_id: str) -> dict[str, Any]:
     run = _find_one("hierarchy_agent_runs", {"run_id": run_id})
     if not run:
         raise ValueError(f"Run not found: {run_id}")
-    return _clean(run)
+    return _clean(_hydrate_run_prompts(run))
+
+
+def _list_hierarchy_runs(query: dict[str, Any]) -> list[dict[str, Any]]:
+    page = max(int(request.args.get("page", 1)), 1)
+    page_size = min(max(int(request.args.get("page_size", 100)), 1), 200)
+    cursor = _db()["hierarchy_agent_runs"].find(query).sort("created_at", -1).skip((page - 1) * page_size).limit(page_size)
+    return [_clean(_hydrate_run_prompts(doc)) for doc in cursor]
 
 
 def _commit_run(run: dict[str, Any]) -> dict[str, Any]:
@@ -324,6 +771,95 @@ def _commit_run(run: dict[str, Any]) -> dict[str, Any]:
     state.update(result or {})
     state["status"] = "completed"
     state["committed"] = True
+    return _save_run(state)
+
+
+def _review_sequence(agent_type: str) -> list[str]:
+    return {
+        "world": [],
+        "worldview": ["world_rule_review_node", "worldview_consistency_review_node"],
+        "novel": ["review_node"],
+        "outline": ["world_review_node", "worldview_review_node", "novel_review_node"],
+        "chapter": ["world_review_node", "worldview_review_node", "novel_review_node", "outline_review_node", "chapter_review_node"],
+        "outline_summary_create": ["review_node"],
+        "outline_summary_update": ["review_node"],
+        "chapter_outline_summary_create": ["review_node"],
+        "chapter_outline_summary_update": ["review_node"],
+        "chapter_content_summary_create": ["review_node"],
+        "chapter_content_summary_update": ["review_node"],
+    }[agent_type]
+
+
+def _request_changes_run(run: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    module = AGENT_MODULES[run["agent_type"]]
+    revision_mode = data.get("revision_mode")
+    if revision_mode not in {"partial_rewrite", "content_rewrite", "full_rewrite"}:
+        raise ValueError(f"Invalid revision_mode: {revision_mode}")
+
+    patch_payload = data.get("payload") or {}
+    if not isinstance(patch_payload, dict):
+        raise ValueError("payload must be an object when decision=request_changes")
+
+    state = copy.deepcopy(run)
+    merged_payload = dict(state.get("pending_payload") or state.get("payload") or {})
+    merged_payload.update(patch_payload)
+    state["pending_payload"] = _enrich_payload(run["agent_type"], merged_payload)
+    state["feedback"] = str(data.get("message") or "")
+    state["decision"] = "request_changes"
+    state["revision_mode"] = revision_mode
+    state["manual_edit"] = bool(data.get("manual_edit"))
+    state["committed"] = False
+
+    conversation = list(state.get("conversation") or [])
+    conversation.append({
+        "role": "user",
+        "message": state["feedback"],
+        "decision": "request_changes",
+        "revision_mode": revision_mode,
+        "manual_edit": state["manual_edit"],
+        "payload": state["pending_payload"],
+        "created_at": _now(),
+    })
+    state["conversation"] = conversation
+
+    result = module.modify_content_node(state)
+    if result:
+        state.update(result)
+    nodes = list(state.get("nodes") or [])
+    if nodes and nodes[-1].get("node_id") == "modify_content":
+        modify_input = dict(nodes[-1].get("input") or {})
+        modify_input["manual_edit"] = state["manual_edit"]
+        nodes[-1]["input"] = modify_input
+        state["nodes"] = nodes
+
+    for node_name in _review_sequence(run["agent_type"]):
+        _run_node(module, node_name, state)
+        if state.get("current_node") == "modify_content":
+            state["status"] = "review_failed"
+            break
+
+    if state.get("status") != "review_failed":
+        state["current_node"] = "human"
+        state["status"] = "waiting_human"
+
+    return _save_run(state)
+
+
+def _reject_run(run: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    state = copy.deepcopy(run)
+    state["decision"] = "reject"
+    state["feedback"] = str(data.get("message") or "")
+    state["status"] = "rejected"
+    state["current_node"] = "end"
+    state["committed"] = False
+    conversation = list(state.get("conversation") or [])
+    conversation.append({
+        "role": "user",
+        "message": state["feedback"],
+        "decision": "reject",
+        "created_at": _now(),
+    })
+    state["conversation"] = conversation
     return _save_run(state)
 
 
@@ -448,6 +984,21 @@ def _dispatch_response(dispatch: dict[str, Any], route: dict[str, Any], run: dic
 
 
 def _start_agent_run(agent_type: str, action: str, payload: dict[str, Any], message: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    if agent_type == "chapter" and action == "check":
+        state = chapter_check_agent.run_check(_enrich_payload(agent_type, payload), message)
+        run = {
+            **state,
+            "run_id": f"run_{uuid.uuid4().hex[:12]}",
+            "agent_type": agent_type,
+            "action": action,
+            "review_required": True,
+            "status": state.get("status", "completed"),
+            "current_node": state.get("current_node", "output"),
+            "committed": False,
+        }
+        if metadata:
+            run["dispatch"] = metadata
+        return _save_run(run)
     state = _run_until_human(agent_type, action, payload, message)
     run = {
         **state,
@@ -570,6 +1121,7 @@ def create_world():
         return _json({"status": "error", "error": "Missing world name"}, 400)
     if _find_one("worlds", {"world_id": world_id}):
         return _json({"status": "error", "error": f"World already exists: {world_id}"}, 409)
+    worldview_id = f"wv_{world_id}"
     doc = {
         "world_id": world_id,
         "name": data["name"],
@@ -580,7 +1132,20 @@ def create_world():
         "updated_at": _now(),
     }
     _db()["worlds"].insert_one(doc)
-    return _json({"status": "success", "world_id": world_id})
+    _db()["worldviews"].insert_one(
+        {
+            "worldview_id": worldview_id,
+            "world_id": world_id,
+            "name": f"{data['name']} 世界观设定集",
+            "summary": data.get("summary", ""),
+            "forbidden_rules": [],
+            "basic_settings": {},
+            "auto_created": True,
+            "created_at": _now(),
+            "updated_at": _now(),
+        }
+    )
+    return _json({"status": "success", "world_id": world_id, "worldview_id": worldview_id})
 
 
 @app.post("/api/worlds/update")
@@ -601,15 +1166,15 @@ def delete_world():
     world_id = _require(data.get("world_id"), "Missing world_id")
     db = _db()
     if not data.get("cascade", False):
-        if db["worldviews"].count_documents({"world_id": world_id}) > 0 or db["novels"].count_documents({"world_id": world_id}) > 0:
+        if db["novels"].count_documents({"world_id": world_id}) > 0:
             return _json({"status": "error", "error": "Conflict: World has children. Use cascade=True to delete."}, 409)
     db["worlds"].delete_many({"world_id": world_id})
+    db["worldviews"].delete_many({"world_id": world_id})
+    db["lore"].delete_many({"world_id": world_id})
     if data.get("cascade", True):
-        db["worldviews"].delete_many({"world_id": world_id})
         db["novels"].delete_many({"world_id": world_id})
         db["outlines"].delete_many({"world_id": world_id})
         db["prose"].delete_many({"world_id": world_id})
-        db["lore"].delete_many({"world_id": world_id})
     return _json({"status": "success", "world_id": world_id})
 
 
@@ -633,25 +1198,39 @@ def create_worldview():
     world_id = _require(data.get("world_id"), "Missing world_id")
     if not _find_one("worlds", {"world_id": world_id}):
         return _json({"status": "error", "error": f"Parent World {world_id} not found"}, 404)
-    worldview_id = data.get("worldview_id") or f"wv_{uuid.uuid4().hex[:8]}"
-    doc = {
-        "worldview_id": worldview_id,
-        "world_id": world_id,
-        "name": _require(data.get("name"), "Missing worldview name"),
-        "summary": data.get("summary", ""),
-        "forbidden_rules": data.get("forbidden_rules", []),
-        "basic_settings": data.get("basic_settings", {}),
-        "created_at": _now(),
-        "updated_at": _now(),
-    }
-    _db()["worldviews"].update_one({"worldview_id": worldview_id}, {"$set": doc}, upsert=True)
-    return _json({"status": "success", "worldview_id": worldview_id})
+    existing_worldview = _find_worldview_by_world(world_id)
+    return _json(
+        {
+            "status": "error",
+            "error": (
+                "Create worldview is disabled. Each world automatically owns one independent worldview library when the world is created. "
+                f"Use /workflow/worldview?action=create&world_id={world_id} to create worldview settings inside library "
+                f"{existing_worldview.get('worldview_id') if existing_worldview else ''}, or use /api/worldviews/update only to maintain the library metadata."
+            ).strip(),
+        },
+        409,
+    )
 
 
 @app.post("/api/worldviews/update")
 def update_worldview():
     data = _body()
     worldview_id = _require(data.get("worldview_id") or data.get("target_id"), "Missing worldview_id")
+    worldview = _find_one("worldviews", {"worldview_id": worldview_id})
+    if not worldview:
+        return _json({"status": "error", "error": f"Worldview not found: {worldview_id}"}, 404)
+    requested_world_id = data.get("world_id")
+    if requested_world_id and requested_world_id != worldview.get("world_id"):
+        return _json(
+            {
+                "status": "error",
+                "error": (
+                    f"Worldview {worldview_id} belongs to world {worldview.get('world_id')} and cannot be moved "
+                    f"to world {requested_world_id}. Each world keeps its own independent worldview set."
+                ),
+            },
+            409,
+        )
     update = {key: data[key] for key in ("name", "summary", "forbidden_rules", "basic_settings") if key in data}
     update["updated_at"] = _now()
     _db()["worldviews"].update_one({"worldview_id": worldview_id}, {"$set": update})
@@ -676,7 +1255,86 @@ def list_worldviews():
         return _json({"status": "error", "error": "Missing required query condition"}, 400)
     if not request.args.get("page"):
         return _json({"status": "error", "error": "Missing pagination"}, 400)
+    if "world_id" in query and "worldview_id" not in query:
+        if _find_one("worlds", {"world_id": query["world_id"]}):
+            _ensure_worldview_library(query["world_id"])
+        else:
+            return _json([])
     return _json(_list_collection("worldviews", query))
+
+
+@app.post("/api/worldviews/import")
+def import_worldviews():
+    world_id = _require(request.form.get("world_id"), "Missing world_id")
+    worldview_id = _require(request.form.get("worldview_id"), "Missing worldview_id")
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        return _json({"status": "error", "error": "Missing import file"}, 400)
+
+    world = _find_one("worlds", {"world_id": world_id})
+    if not world:
+        return _json({"status": "error", "error": f"World not found: {world_id}"}, 404)
+    worldview = _ensure_worldview_library(world_id)
+    if worldview["worldview_id"] != worldview_id:
+        return _json(
+            {
+                "status": "error",
+                "error": (
+                    f"World {world_id} owns unique worldview library {worldview['worldview_id']}; "
+                    f"requested import target {worldview_id} is invalid."
+                ),
+            },
+            409,
+        )
+
+    suffix = os.path.splitext(upload.filename)[1].lower()
+    temp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+            upload.save(temp_file)
+            temp_path = temp_file.name
+        parsed_entries = _parse_worldview_import_file(temp_path, upload.filename)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+    if not parsed_entries:
+        return _json({"status": "error", "error": "No structured worldview entries parsed from file"}, 400)
+
+    imported_entries: list[dict[str, Any]] = []
+    db = _db()
+    for entry in parsed_entries:
+        path = " > ".join(_normalize_hierarchy_path(entry["path"]))
+        doc_id = f"wvimp_{uuid.uuid5(uuid.NAMESPACE_URL, f'{world_id}:{worldview_id}:{path}').hex}"
+        existing = db["lore"].find_one({"id": doc_id}) or {}
+        created_at = existing.get("created_at") or _now()
+        doc = {
+            "id": doc_id,
+            "doc_id": doc_id,
+            "type": "worldview",
+            "name": entry["name"],
+            "content": entry["content"],
+            "category": path,
+            "path": path,
+            "world_id": world_id,
+            "worldview_id": worldview_id,
+            "created_at": created_at,
+            "updated_at": _now(),
+            "timestamp": _now(),
+            "source_filename": upload.filename,
+        }
+        db["lore"].update_one({"id": doc_id}, {"$set": doc}, upsert=True)
+        imported_entries.append({"id": doc_id, "name": entry["name"], "path": path})
+
+    return _json(
+        {
+            "status": "success",
+            "world_id": world_id,
+            "worldview_id": worldview_id,
+            "imported_count": len(imported_entries),
+            "entries": imported_entries,
+        }
+    )
 
 
 @app.post("/api/novels/create")
@@ -828,15 +1486,19 @@ def update_archive():
         })
         name = data.get("name") or data.get("title")
         if name: update_fields["name"] = update_fields["title"] = name
-        for key in ("content", "outline_id", "novel_id", "worldview_id", "world_id"):
+        for key in ("content", "outline_id", "novel_id", "worldview_id", "world_id", "chapter_outline_id"):
             if key in data: update_fields[key] = data[key]
         db["prose"].update_one({"id": item_id}, {"$set": update_fields}, upsert=True)
     elif item_type == "worldview":
         update_fields.update({"id": item_id, "type": "worldview"})
         if "name" in data: update_fields["name"] = data["name"]
         if "content" in data: update_fields["content"] = data["content"]
-        for key in ("category", "world_id", "worldview_id"):
+        for key in ("category", "path", "world_id", "worldview_id"):
             if key in data: update_fields[key] = data[key]
+        if "path" in update_fields and "category" not in update_fields:
+            update_fields["category"] = update_fields["path"]
+        if "category" in update_fields and "path" not in update_fields:
+            update_fields["path"] = update_fields["category"]
         db["lore"].update_one({"id": item_id}, {"$set": update_fields}, upsert=True)
     elif item_type == "outline":
         update_fields.update({"outline_id": item_id, "id": item_id})
@@ -868,17 +1530,40 @@ def delete_archive():
 
 @app.get("/api/lore/list")
 def list_lore():
-    query: dict[str, Any] = {}
-    for key in ("world_id", "worldview_id", "novel_id", "outline_id", "type"):
+    filters: list[dict[str, Any]] = []
+    for key in ("world_id", "worldview_id", "novel_id", "outline_id", "type", "chapter_outline_id"):
         if request.args.get(key):
-            query[key] = request.args[key]
-    if not query:
+            filters.append({key: request.args[key]})
+    chapter_outline_mode = request.args.get("chapter_outline_mode", "").strip().lower()
+    if not request.args.get("chapter_outline_id"):
+        if chapter_outline_mode == "root":
+            filters.append({
+                "$or": [
+                    {"chapter_outline_id": {"$exists": False}},
+                    {"chapter_outline_id": ""},
+                    {"chapter_outline_id": None},
+                ],
+            })
+        elif chapter_outline_mode == "child":
+            filters.append({"chapter_outline_id": {"$exists": True, "$nin": ["", None]}})
+    if not filters:
         return _json({"status": "error", "error": "Missing required query condition"}, 400)
     if not request.args.get("page"):
         return _json({"status": "error", "error": "Missing pagination"}, 400)
     if request.args.get("query"):
         text = request.args["query"]
-        query["$or"] = [{"name": {"$regex": text, "$options": "i"}}, {"title": {"$regex": text, "$options": "i"}}, {"content": {"$regex": text, "$options": "i"}}]
+        filters.append({
+            "$or": [
+                {"name": {"$regex": text, "$options": "i"}},
+                {"title": {"$regex": text, "$options": "i"}},
+                {"content": {"$regex": text, "$options": "i"}},
+            ],
+        })
+    query: dict[str, Any]
+    if len(filters) == 1:
+        query = filters[0]
+    else:
+        query = {"$and": filters}
     items = _list_collection("prose", query) + _list_collection("lore", query)
     return _json(items)
 
@@ -997,6 +1682,32 @@ def get_outline_chapter_state():
         "outline_id": outline_id,
         "chapters": chapters,
     })
+
+
+@app.get("/api/downstream-summaries/list")
+def list_downstream_summaries():
+    query = {
+        key: request.args[key]
+        for key in (
+            "summary_id",
+            "summary_key",
+            "agent_type",
+            "summary_scope",
+            "summary_action",
+            "world_id",
+            "worldview_id",
+            "novel_id",
+            "outline_id",
+            "chapter_id",
+            "target_id",
+        )
+        if request.args.get(key)
+    }
+    if not query:
+        return _json({"status": "error", "error": "Missing required query condition"}, 400)
+    if not request.args.get("page"):
+        return _json({"status": "error", "error": "Missing pagination"}, 400)
+    return _json(_list_collection("downstream_summaries", query))
 
 
 @app.get("/api/router/agents")
@@ -1129,6 +1840,23 @@ def start_hierarchy_agent():
     action = data.get("action", "create")
     if agent_type not in AGENT_MODULES:
         raise ValueError(f"Unsupported agent_type: {agent_type}")
+    if action == "check" and agent_type != "chapter":
+        raise ValueError("Only chapter supports action=check")
+    if action not in {"create", "update", "check"}:
+        raise ValueError(f"Unsupported action: {action}")
+    payload = data.get("payload") or {}
+    if action == "check":
+        if not isinstance(payload, dict):
+            raise ValueError("payload must be an object")
+        if not payload.get("outline_id"):
+            raise ValueError("章节检查工作流必须提供 outline_id")
+        if not str(payload.get("content") or "").strip():
+            raise ValueError("章节检查工作流必须提供直接内容")
+        if not str(payload.get("chapter_outline") or "").strip():
+            # Allow target chapter readback only when an explicit target is supplied.
+            has_target = any(payload.get(key) for key in ("target_id", "chapter_outline_id", "chapter_id", "scene_id", "prose_id", "id"))
+            if not has_target:
+                raise ValueError("章节检查工作流必须提供章节大纲，或指定可读取的目标章节")
     run = _start_agent_run(agent_type, action, data.get("payload") or {}, data.get("message", ""))
     return _json({"status": "success", "run": run})
 
@@ -1139,8 +1867,14 @@ def respond_hierarchy_agent():
     run_id = _require(data.get("run_id"), "Missing run_id")
     decision = data.get("decision")
     run = _load_run(run_id)
+    if run.get("status") not in {"waiting_human", "review_failed"}:
+        raise ValueError(f"Run status does not accept human decisions: {run.get('status')}")
     if decision == "approve":
         run = _commit_run(run)
+    elif decision == "request_changes":
+        run = _request_changes_run(run, data)
+    elif decision == "reject":
+        run = _reject_run(run, data)
     else:
         raise ValueError(f"Unsupported decision in minimal backend: {decision}")
     return _json({"status": "success", "run": run})
@@ -1151,7 +1885,7 @@ def list_hierarchy_agents():
     query = {key: request.args[key] for key in ("agent_type", "run_id", "world_id") if request.args.get(key)}
     if not query:
         return _json({"status": "error", "error": "Missing required query condition"}, 400)
-    return _json({"status": "success", "runs": _list_collection("hierarchy_agent_runs", query)})
+    return _json({"status": "success", "runs": _list_hierarchy_runs(query)})
 
 
 @app.get("/api/hierarchy-agent/get")

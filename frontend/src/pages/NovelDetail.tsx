@@ -26,8 +26,9 @@ import {
   IconRefresh,
   IconSettings,
   IconShieldCheck,
+  IconTrash,
 } from '@tabler/icons-react';
-import { api } from '../api/client';
+import { api, getApiErrorMessage, isApiNotFoundError } from '../api/client';
 
 type World = {
   world_id: string;
@@ -107,7 +108,10 @@ export const NovelDetail: React.FC = () => {
   const [newSettingKey, setNewSettingKey] = useState('');
   const [newSettingValue, setNewSettingValue] = useState('');
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [missingNovel, setMissingNovel] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
 
   const loadWorlds = useCallback(async () => {
@@ -119,6 +123,7 @@ export const NovelDetail: React.FC = () => {
     if (!novelId) return;
     setLoading(true);
     setError(null);
+    setMissingNovel(false);
     setSuccess(null);
     try {
       await loadWorlds();
@@ -131,8 +136,14 @@ export const NovelDetail: React.FC = () => {
       setSummary(nextNovel.summary || '');
       setRules(normalizeRules(nextNovel.forbidden_rules));
       setSettings(normalizeSettings(nextNovel.basic_settings));
-    } catch (err: any) {
-      setError(err?.response?.data?.error || err?.message || String(err));
+    } catch (err: unknown) {
+      const nextMissingNovel = isApiNotFoundError(err, 'Novel not found');
+      setMissingNovel(nextMissingNovel);
+      setError(
+        nextMissingNovel
+          ? `小说 ${novelId} 不存在，可能已被删除。请返回小说列表重新选择。`
+          : getApiErrorMessage(err, '加载小说详情失败。'),
+      );
       setNovel(null);
     } finally {
       setLoading(false);
@@ -188,6 +199,51 @@ export const NovelDetail: React.FC = () => {
     navigate(`/workflow/novel?${params.toString()}`);
   };
 
+  const saveNovel = async () => {
+    if (!novelId || !worldId || !name.trim()) {
+      setError('保存小说必须选择所属世界并填写小说名称。');
+      setSuccess(null);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await api.updateNovel({
+        novel_id: novelId,
+        world_id: worldId,
+        name: name.trim(),
+        introduction,
+        summary,
+        forbidden_rules: rules.map((item) => item.trim()).filter(Boolean),
+        basic_settings: basicSettings,
+      });
+      await loadNovel();
+      setSuccess(`小说已保存：${novelId}`);
+    } catch (err) {
+      setError(getApiErrorMessage(err, '保存小说失败。'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteNovel = async () => {
+    if (!novelId) return;
+    const confirmed = window.confirm('确认删除该小说以及旗下所有大纲、章节和相关内容？此操作不可恢复。');
+    if (!confirmed) return;
+    setDeleting(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await api.deleteNovel({ novel_id: novelId, cascade: true });
+      navigate('/novels');
+    } catch (err) {
+      setError(getApiErrorMessage(err, '删除小说失败。'));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <Stack gap="md" style={{ minHeight: 'calc(100vh - 96px)' }}>
       <Group justify="space-between" align="flex-start">
@@ -202,11 +258,34 @@ export const NovelDetail: React.FC = () => {
         <Group gap="xs">
           <Button variant="light" leftSection={<IconArrowLeft size={16} />} onClick={() => navigate('/novels')}>返回小说列表</Button>
           <Button variant="light" leftSection={<IconRefresh size={16} />} loading={loading} onClick={loadNovel}>刷新</Button>
+          <Button
+            color="red"
+            variant="light"
+            leftSection={<IconTrash size={16} />}
+            onClick={deleteNovel}
+            loading={deleting}
+            disabled={!novel || saving}
+          >
+            删除小说
+          </Button>
+          <Button
+            color="green"
+            leftSection={<IconDeviceFloppy size={16} />}
+            onClick={saveNovel}
+            loading={saving}
+            disabled={!novel || !worldId || !name.trim() || deleting}
+          >
+            保存修改
+          </Button>
           <Button leftSection={<IconDeviceFloppy size={16} />} onClick={openNovelAgentWorkflow} disabled={!novel || !worldId || !name.trim()}>进入小说 Agent 工作流</Button>
         </Group>
       </Group>
 
-      {error && <Alert color="red" title="真实接口请求失败">{error}</Alert>}
+      {error && (
+        <Alert color={missingNovel ? 'yellow' : 'red'} title={missingNovel ? '目标小说不存在或已删除' : '真实接口请求失败'}>
+          {error}
+        </Alert>
+      )}
       {success && <Alert color="green">{success}</Alert>}
       {loading && !novel && <Loader />}
 

@@ -39,10 +39,22 @@ import {
   IconRefresh,
   IconSend,
 } from '@tabler/icons-react';
-import { api } from '../api/client';
+import { api, getApiErrorMessage } from '../api/client';
+import { getWorldviewDisplayName } from '../utils/worldview';
 
-type AgentType = 'world' | 'worldview' | 'novel' | 'outline' | 'chapter';
-type AgentAction = 'create' | 'update';
+type AgentType =
+  | 'world'
+  | 'worldview'
+  | 'novel'
+  | 'outline'
+  | 'chapter'
+  | 'outline_summary_create'
+  | 'outline_summary_update'
+  | 'chapter_outline_summary_create'
+  | 'chapter_outline_summary_update'
+  | 'chapter_content_summary_create'
+  | 'chapter_content_summary_update';
+type AgentAction = 'create' | 'update' | 'check';
 type RevisionMode = 'partial_rewrite' | 'content_rewrite' | 'full_rewrite';
 
 type WorkflowNode = {
@@ -90,10 +102,12 @@ type AgentRun = {
 };
 
 type World = { world_id: string; name: string; summary?: string };
-type Worldview = { worldview_id: string; world_id: string; name: string; summary?: string };
+type Worldview = { worldview_id: string; world_id: string; name?: string; title?: string; summary?: string };
 type Novel = { novel_id: string; world_id: string; name: string; introduction?: string; summary?: string; forbidden_rules?: unknown; basic_settings?: unknown };
 type Outline = { outline_id: string; world_id: string; novel_id?: string; worldview_id?: string; title: string; summary?: string };
-type Chapter = { id: string; world_id?: string; novel_id?: string; worldview_id?: string; outline_id?: string; name: string; content?: string; type?: string };
+type Chapter = { id?: string; scene_id?: string; prose_id?: string; world_id?: string; novel_id?: string; worldview_id?: string; outline_id?: string; name: string; title?: string; content?: string; type?: string };
+
+const chapterRecordId = (chapter: Chapter) => chapter.id || chapter.scene_id || chapter.prose_id || '';
 
 const uniqueWorldsById = (items: World[]): World[] => {
   const seen = new Set<string>();
@@ -104,20 +118,62 @@ const uniqueWorldsById = (items: World[]): World[] => {
   });
 };
 
-const validTypes: AgentType[] = ['world', 'worldview', 'novel', 'outline', 'chapter'];
-const validActions: AgentAction[] = ['create', 'update'];
+const validTypes: AgentType[] = [
+  'world',
+  'worldview',
+  'novel',
+  'outline',
+  'chapter',
+  'outline_summary_create',
+  'outline_summary_update',
+  'chapter_outline_summary_create',
+  'chapter_outline_summary_update',
+  'chapter_content_summary_create',
+  'chapter_content_summary_update',
+];
+const validActions: AgentAction[] = ['create', 'update', 'check'];
 
 const typeLabel: Record<AgentType, string> = {
   world: '世界',
-  worldview: '世界观',
+  worldview: '世界观设定',
   novel: '小说',
   outline: '大纲',
   chapter: '章节',
+  outline_summary_create: '新增分卷大纲总结',
+  outline_summary_update: '修改分卷大纲总结',
+  chapter_outline_summary_create: '新增章节大纲总结',
+  chapter_outline_summary_update: '修改章节大纲总结',
+  chapter_content_summary_create: '新增章节内容总结',
+  chapter_content_summary_update: '修改章节内容总结',
 };
+
+const outlineLikeTypes = new Set<AgentType>(['outline', 'outline_summary_create', 'outline_summary_update']);
+const chapterLikeTypes = new Set<AgentType>([
+  'chapter',
+  'chapter_outline_summary_create',
+  'chapter_outline_summary_update',
+  'chapter_content_summary_create',
+  'chapter_content_summary_update',
+]);
+const summaryWorkflowTypes = new Set<AgentType>([
+  'outline_summary_create',
+  'outline_summary_update',
+  'chapter_outline_summary_create',
+  'chapter_outline_summary_update',
+  'chapter_content_summary_create',
+  'chapter_content_summary_update',
+]);
+const chapterSummaryTypes = new Set<AgentType>([
+  'chapter_outline_summary_create',
+  'chapter_outline_summary_update',
+  'chapter_content_summary_create',
+  'chapter_content_summary_update',
+]);
 
 const actionLabel: Record<AgentAction, string> = {
   create: '新增',
   update: '修改',
+  check: '检查',
 };
 
 const revisionOptions: Array<{ value: RevisionMode; label: string }> = [
@@ -169,6 +225,48 @@ const workflowStepInfo: Record<string, Pick<WorkflowNode, 'step_index' | 'step_t
     function: '执行数据库写入',
     description: '仅在人工批准后创建或更新世界、世界观、小说、大纲或章节，并返回真实写库结果。',
   },
+  world_review: {
+    step_index: 2,
+    step_title: '步骤 2：检查世界规则',
+    function: '检查是否违反世界规则',
+    description: '读取当前世界设定，判断直接内容是否违反世界级别的硬规则、禁忌与基础约束。',
+  },
+  novel_review: {
+    step_index: 3,
+    step_title: '步骤 3：检查小说规则',
+    function: '检查是否违反小说规则',
+    description: '对照小说级设定、禁则和基调要求，判断内容是否偏离当前小说的写作约束。',
+  },
+  worldview_review: {
+    step_index: 4,
+    step_title: '步骤 4：检查世界观',
+    function: '检查是否违反世界观设定',
+    description: '对照世界观设定库，检查角色、组织、力量体系、历史事实等是否出现设定冲突。',
+  },
+  outline_review: {
+    step_index: 5,
+    step_title: '步骤 5：检查分卷大纲',
+    function: '检查是否违反分卷大纲',
+    description: '核对当前分卷目标、关键情节和推进顺序，检查直接内容是否偏离分卷规划。',
+  },
+  chapter_outline_review: {
+    step_index: 6,
+    step_title: '步骤 6：检查章节大纲',
+    function: '检查是否违反章节大纲',
+    description: '直接对照章节大纲，检查本次内容是否遗漏关键点、顺序错乱或擅自扩写到其他章节。',
+  },
+  plot_review: {
+    step_index: 7,
+    step_title: '步骤 7：检查剧情错误',
+    function: '检查是否存在剧情错误',
+    description: '综合判断是否出现因果错误、人物动机断裂、前后矛盾、时间线错误或关键剧情漏洞。',
+  },
+  output: {
+    step_index: 8,
+    step_title: '步骤 8：输出检查结果',
+    function: '汇总所有检查结论',
+    description: '输出总通过状态、失败检查项、逐项说明与最终检查结论，不执行任何写库操作。',
+  },
 };
 
 const workflowStepKey = (nodeId: string) => {
@@ -196,6 +294,17 @@ const worldPlannedNodes: WorkflowNode[] = [
   { node_id: 'draft', label: '创世草案节点', status: 'pending', input: {}, output: {} },
   { node_id: 'human', label: '人工介入', status: 'pending', input: {}, output: {} },
   { node_id: 'apply', label: '写库固化节点', status: 'pending', input: {}, output: {} },
+].map(withStepInfo);
+
+const chapterCheckPlannedNodes: WorkflowNode[] = [
+  { node_id: 'input', label: '输入节点', status: 'pending', input: {}, output: {} },
+  { node_id: 'world_review', label: '世界规则检查', status: 'pending', input: {}, output: {} },
+  { node_id: 'novel_review', label: '小说规则检查', status: 'pending', input: {}, output: {} },
+  { node_id: 'worldview_review', label: '世界观检查', status: 'pending', input: {}, output: {} },
+  { node_id: 'outline_review', label: '分卷大纲检查', status: 'pending', input: {}, output: {} },
+  { node_id: 'chapter_outline_review', label: '章节大纲检查', status: 'pending', input: {}, output: {} },
+  { node_id: 'plot_review', label: '剧情错误检查', status: 'pending', input: {}, output: {} },
+  { node_id: 'output', label: '检查结果输出', status: 'pending', input: {}, output: {} },
 ].map(withStepInfo);
 
 const statusColor: Record<string, string> = {
@@ -226,6 +335,18 @@ const asRecord = (value: unknown): Record<string, any> => (
 
 const first = (value: string | null, fallback = '') => value || fallback;
 
+const deriveOutlineNameFromSummary = (rawSummary: string): string => {
+  const lines = rawSummary
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) return '';
+  const volumeLine = lines.find((line) => /^第.{0,12}卷(?:[：:].*)?$/.test(line) || /^第.{0,12}卷[：:]\s*.+$/.test(line));
+  if (volumeLine) return volumeLine;
+  const shortLine = lines.find((line) => line.length <= 40);
+  return shortLine || lines[0];
+};
+
 type HierarchyWorkflowProps = {
   fixedType?: AgentType;
 };
@@ -242,6 +363,10 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
   const targetId = params.get('id') || params.get('target_id') || '';
   const runId = params.get('run_id') || '';
   const isWorldWorkflow = agentType === 'world';
+  const isOutlineLike = outlineLikeTypes.has(agentType);
+  const isChapterLike = chapterLikeTypes.has(agentType);
+  const isChapterCheck = agentType === 'chapter' && action === 'check';
+  const isSummaryWorkflow = summaryWorkflowTypes.has(agentType);
 
   const [worlds, setWorlds] = useState<World[]>([]);
   const [worldviews, setWorldviews] = useState<Worldview[]>([]);
@@ -252,10 +377,14 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
   const [selectedWorldviewId, setSelectedWorldviewId] = useState(first(params.get('worldview_id'), ''));
   const [selectedNovelId, setSelectedNovelId] = useState(first(params.get('novel_id'), ''));
   const [selectedOutlineId, setSelectedOutlineId] = useState(first(params.get('outline_id'), ''));
+  const [parentPath, setParentPath] = useState(first(params.get('parent_path'), ''));
+  const [currentPath, setCurrentPath] = useState(first(params.get('path'), ''));
   const [name, setName] = useState(first(params.get('name'), ''));
   const [introduction, setIntroduction] = useState(first(params.get('introduction'), ''));
   const [summary, setSummary] = useState(first(params.get('summary'), ''));
   const [content, setContent] = useState(first(params.get('content'), ''));
+  const [selectedChapterId, setSelectedChapterId] = useState(first(params.get('chapter_outline_id') || params.get('target_id') || params.get('id'), ''));
+  const [chapterOutline, setChapterOutline] = useState(first(params.get('chapter_outline'), ''));
   const [message, setMessage] = useState(first(params.get('message'), `${actionLabel[action]}${typeLabel[agentType]}`));
   const [feedback, setFeedback] = useState('');
   const [revisionMode, setRevisionMode] = useState<RevisionMode>('partial_rewrite');
@@ -264,6 +393,14 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const outlineNameSuggestion = useMemo(
+    () => (isOutlineLike ? deriveOutlineNameFromSummary(summary) : ''),
+    [isOutlineLike, summary],
+  );
+  const effectiveName = useMemo(
+    () => name.trim() || (isOutlineLike ? outlineNameSuggestion : ''),
+    [isOutlineLike, name, outlineNameSuggestion],
+  );
 
   useEffect(() => {
     if (!isWorldWorkflow || !params.get('world_id')) return;
@@ -280,9 +417,17 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
     if (typeof payload.introduction === 'string') {
       setIntroduction(payload.introduction);
     }
-    if (agentType === 'chapter') {
+    if (isChapterLike) {
       if (typeof payload.content === 'string') {
         setContent(payload.content);
+      }
+      if (typeof payload.chapter_outline === 'string') {
+        setChapterOutline(payload.chapter_outline);
+      }
+      if (typeof payload.chapter_outline_id === 'string') {
+        setSelectedChapterId(payload.chapter_outline_id);
+      } else if (typeof payload.target_id === 'string' && isChapterCheck) {
+        setSelectedChapterId(payload.target_id);
       }
     } else if (typeof payload.summary === 'string') {
       setSummary(payload.summary);
@@ -293,13 +438,19 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
     if (typeof payload.worldview_id === 'string') {
       setSelectedWorldviewId(payload.worldview_id);
     }
+    if (typeof payload.parent_path === 'string') {
+      setParentPath(payload.parent_path);
+    }
+    if (typeof payload.path === 'string') {
+      setCurrentPath(payload.path);
+    }
     if (typeof payload.novel_id === 'string') {
       setSelectedNovelId(payload.novel_id);
     }
     if (typeof payload.outline_id === 'string') {
       setSelectedOutlineId(payload.outline_id);
     }
-  }, [agentType, isWorldWorkflow]);
+  }, [isChapterCheck, isChapterLike, isWorldWorkflow]);
 
   const resolveRunNodeId = useCallback((nextRun: AgentRun) => {
     const nodes = isWorldWorkflow ? nextRun.nodes.filter((node) => node.node_id !== 'review') : nextRun.nodes;
@@ -323,6 +474,10 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
     setLoading(true);
     setError(null);
     try {
+      if (isWorldWorkflow && action === 'create' && !runId) {
+        return;
+      }
+
       const worldRes = await api.listWorlds();
       const nextWorlds = uniqueWorldsById((worldRes.data as World[]) || []);
       setWorlds(nextWorlds);
@@ -348,24 +503,24 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
         if (current) return current;
         const initialNovelId = params.get('novel_id');
         if (initialNovelId) return initialNovelId;
-        return agentType === 'outline' || agentType === 'chapter' ? '' : nextNovels[0]?.novel_id || '';
+        return isOutlineLike || isChapterLike ? '' : nextNovels[0]?.novel_id || '';
       });
       setSelectedOutlineId((current) => {
         if (current) return current;
         const initialOutlineId = params.get('outline_id');
         if (initialOutlineId) return initialOutlineId;
-        return agentType === 'chapter' ? '' : nextOutlines[0]?.outline_id || '';
+        return isChapterLike ? '' : nextOutlines[0]?.outline_id || '';
       });
 
       const chapterScope = params.get('outline_id') || selectedOutlineId || '';
       if (nextWorldId && chapterScope) {
-        const chapterRes = await api.listLore({ world_id: nextWorldId, outline_id: chapterScope, page: 1, page_size: 100 });
+        const chapterRes = await api.listLore({ world_id: nextWorldId, outline_id: chapterScope, type: 'prose', page: 1, page_size: 100 });
         setChapters((chapterRes.data as Chapter[]).filter((item) => item.type === 'prose'));
       } else {
         setChapters([]);
       }
 
-      if (action === 'update' && targetId) {
+      if ((action === 'update' || isChapterCheck) && targetId) {
         if (agentType === 'world') {
           const found = nextWorlds.find((item) => item.world_id === targetId);
           if (found) {
@@ -395,7 +550,7 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
             setSelectedNovelId(found.novel_id);
           }
         }
-        if (agentType === 'outline') {
+        if (isOutlineLike) {
           const res = await api.listOutlines({ outline_id: targetId, page: 1, page_size: 10 });
           const found = (res.data as Outline[]).find((item) => item.outline_id === targetId);
           if (found) {
@@ -406,15 +561,21 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
             setSelectedNovelId(found.novel_id || '');
           }
         }
-        if (agentType === 'chapter') {
+        if (isChapterLike) {
           const scopeWorld = nextWorldId || selectedWorldId;
           const scopeOutline = params.get('outline_id') || selectedOutlineId;
           if (scopeWorld && scopeOutline) {
-            const res = await api.listLore({ world_id: scopeWorld, outline_id: scopeOutline, page: 1, page_size: 100 });
-            const found = (res.data as Chapter[]).find((item) => item.id === targetId);
+            const res = await api.listLore({ world_id: scopeWorld, outline_id: scopeOutline, type: 'prose', page: 1, page_size: 100 });
+            const found = (res.data as Chapter[]).find((item) => chapterRecordId(item) === targetId);
             if (found) {
-              setName(found.name || '');
-              setContent(found.content || '');
+              setName(found.name || found.title || '');
+              if (isChapterCheck) {
+                setSelectedChapterId(chapterRecordId(found));
+                setChapterOutline(found.content || '');
+                setContent(params.get('content') || '');
+              } else {
+                setContent(found.content || '');
+              }
               setSelectedWorldId(found.world_id || scopeWorld);
               setSelectedWorldviewId(found.worldview_id || '');
               setSelectedNovelId(found.novel_id || '');
@@ -428,26 +589,43 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
       if (runId) {
         await loadRun(runId);
       }
-    } catch (err: any) {
-      setError(err?.response?.data?.error || err?.message || String(err));
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, '加载工作流上下文失败，请稍后重试。'));
     } finally {
       setLoading(false);
     }
-  }, [action, agentType, isWorldWorkflow, loadRun, params, runId, selectedOutlineId, selectedWorldId, targetId]);
+  }, [action, agentType, isChapterCheck, isChapterLike, isOutlineLike, isWorldWorkflow, loadRun, params, runId, selectedOutlineId, selectedWorldId, targetId]);
 
   useEffect(() => {
     loadContext();
   }, [loadContext]);
 
+  const handleChapterOutlineSelect = useCallback((value: string | null) => {
+    const nextId = value || '';
+    setSelectedChapterId(nextId);
+    if (!nextId) return;
+    const targetChapter = chapters.find((item) => chapterRecordId(item) === nextId);
+    if (!targetChapter) return;
+    setName(targetChapter.name || targetChapter.title || '');
+    setChapterOutline(targetChapter.content || '');
+    if (targetChapter.world_id) setSelectedWorldId(targetChapter.world_id);
+    if (targetChapter.worldview_id) setSelectedWorldviewId(targetChapter.worldview_id);
+    if (targetChapter.novel_id) setSelectedNovelId(targetChapter.novel_id);
+    if (targetChapter.outline_id) setSelectedOutlineId(targetChapter.outline_id);
+  }, [chapters]);
+
   const selectedNodes = useMemo(() => {
-    const rawNodes = run?.nodes?.length ? run.nodes.map(withStepInfo) : (isWorldWorkflow ? worldPlannedNodes : plannedNodes);
+    const rawNodes = run?.nodes?.length
+      ? run.nodes.map(withStepInfo)
+      : (isWorldWorkflow ? worldPlannedNodes : isChapterCheck ? chapterCheckPlannedNodes : plannedNodes);
     return isWorldWorkflow ? rawNodes.filter((node) => node.node_id !== 'review') : rawNodes;
-  }, [isWorldWorkflow, run?.nodes]);
+  }, [isChapterCheck, isWorldWorkflow, run?.nodes]);
   const rawCurrentNodeId = run?.current_node || selectedNodes.find((node) => ['waiting', 'blocked', 'failed'].includes(node.status))?.node_id || selectedNodeId;
   const currentNodeId = isWorldWorkflow && rawCurrentNodeId === 'review' ? 'human' : rawCurrentNodeId;
   const selectedNode = selectedNodes.find((node) => node.node_id === selectedNodeId) || selectedNodes[0];
   const selectedNodeOutput = asRecord(selectedNode?.output);
   const selectedLlmCall = asRecord(selectedNodeOutput.llm_call);
+  const selectedLlmPrompt = typeof selectedLlmCall.prompt === 'string' ? selectedLlmCall.prompt : '';
 
   const graph = useMemo(() => {
     const nodes: Node[] = selectedNodes.map((node, index) => {
@@ -486,18 +664,32 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
     if (action === 'update') {
       payload.target_id = targetId;
     }
-    if (agentType !== 'chapter') {
-      payload.name = name;
+    if (isSummaryWorkflow && targetId) {
+      payload.target_id = targetId;
+      if (chapterSummaryTypes.has(agentType)) {
+        payload.chapter_id = targetId;
+      }
+    }
+    if (!isChapterLike) {
+      payload.name = effectiveName;
       if (agentType === 'novel' && introduction) {
         payload.introduction = introduction;
       }
       payload.summary = summary;
     } else {
-      payload.name = name;
+      if (name.trim()) {
+        payload.name = name.trim();
+      }
       payload.content = content || summary;
     }
     if (agentType === 'worldview' || agentType === 'novel') {
       payload.world_id = selectedWorldId;
+    }
+    if (agentType === 'worldview' && selectedWorldviewId) {
+      payload.worldview_id = selectedWorldviewId;
+      if (action === 'create' && parentPath.trim()) {
+        payload.parent_path = parentPath.trim();
+      }
     }
     if (agentType === 'world' || agentType === 'novel') {
       const forbiddenRules = parseJsonParam(params.get('forbidden_rules'));
@@ -505,16 +697,26 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
       if (forbiddenRules !== undefined) payload.forbidden_rules = forbiddenRules;
       if (basicSettings !== undefined) payload.basic_settings = basicSettings;
     }
-    if (agentType === 'outline') {
+    if (isOutlineLike) {
       payload.novel_id = selectedNovelId;
       payload.worldview_id = selectedWorldviewId;
       payload.world_id = selectedWorldId;
     }
-    if (agentType === 'chapter') {
+    if (isChapterLike) {
       payload.outline_id = selectedOutlineId;
       payload.novel_id = selectedNovelId;
       payload.worldview_id = selectedWorldviewId;
       payload.world_id = selectedWorldId;
+      if (selectedChapterId) {
+        payload.chapter_outline_id = selectedChapterId;
+      }
+      if (isChapterCheck) {
+        payload.chapter_outline = chapterOutline;
+        if (selectedChapterId) {
+          payload.target_id = selectedChapterId;
+          payload.chapter_outline_id = selectedChapterId;
+        }
+      }
     }
     return payload;
   };
@@ -522,23 +724,49 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
   const requiredContextError = useMemo(() => {
     if (agentType === 'world') return '';
     if (!selectedWorldId) return `${typeLabel[agentType]}工作流必须提供 world_id`;
-    if (agentType === 'outline' && !selectedNovelId) return '大纲工作流必须提供 novel_id';
-    if (agentType === 'chapter' && !selectedOutlineId) return '章节工作流必须提供 outline_id';
+    if (agentType === 'worldview' && !selectedWorldviewId) return '世界观工作流必须绑定当前世界唯一的世界观设定库';
+    if (isOutlineLike && !selectedNovelId) return `${typeLabel[agentType]}工作流必须提供 novel_id`;
+    if (isChapterLike && !selectedOutlineId) return `${typeLabel[agentType]}工作流必须提供 outline_id`;
     return '';
-  }, [agentType, selectedNovelId, selectedOutlineId, selectedWorldId]);
+  }, [agentType, isChapterLike, isOutlineLike, selectedNovelId, selectedOutlineId, selectedWorldId, selectedWorldviewId]);
 
-  const validateBeforeStart = () => {
+  const validateBeforeStart = useCallback(() => {
     if (!fixedType && !validTypes.includes(requestedType as AgentType)) return `非法 type: ${requestedType}`;
     if (!validActions.includes(requestedAction as AgentAction)) return `非法 action: ${requestedAction}`;
     if (action === 'update' && !targetId) return '修改工作流必须提供 id 或 target_id';
     if (requiredContextError) return requiredContextError;
-    if (!name.trim()) return `${typeLabel[agentType]}名称不能为空`;
+    if (!isChapterCheck && !effectiveName) {
+      if (isOutlineLike) {
+        return '分卷大纲必须提供卷名；你可以直接在正文首行写“第一卷：失踪者”，系统会自动识别。';
+      }
+      return `${typeLabel[agentType]}名称不能为空`;
+    }
     if ((agentType === 'worldview' || agentType === 'novel') && !selectedWorldId) return `${typeLabel[agentType]}必须选择世界`;
-    if (agentType === 'outline' && !selectedNovelId) return '大纲必须选择小说';
-    if (agentType === 'chapter' && !selectedOutlineId) return '章节必须选择大纲';
-    if (agentType === 'chapter' && !(content || summary).trim()) return '章节内容不能为空';
+    if (isOutlineLike && !selectedNovelId) return `${typeLabel[agentType]}必须选择小说`;
+    if (isChapterLike && !selectedOutlineId) return `${typeLabel[agentType]}必须选择大纲`;
+    if (isChapterCheck && !chapterOutline.trim()) return '章节检查工作流必须提供章节大纲';
+    if (isChapterLike && !(content || summary).trim()) return `${typeLabel[agentType]}内容不能为空`;
     return '';
-  };
+  }, [
+    action,
+    agentType,
+    chapterOutline,
+    content,
+    effectiveName,
+    fixedType,
+    isChapterCheck,
+    isChapterLike,
+    isOutlineLike,
+    requiredContextError,
+    requestedAction,
+    requestedType,
+    selectedChapterId,
+    selectedNovelId,
+    selectedOutlineId,
+    selectedWorldId,
+    targetId,
+  ]);
+  const startValidationError = useMemo(() => (run ? '' : validateBeforeStart()), [run, validateBeforeStart]);
 
   const replaceRunId = (nextRunId: string) => {
     const next = new URLSearchParams(location.search);
@@ -566,8 +794,8 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
       applyRunPayload(nextRun);
       setSelectedNodeId(resolveRunNodeId(nextRun));
       replaceRunId(nextRun.run_id);
-    } catch (err: any) {
-      setError(err?.response?.data?.error || err?.message || String(err));
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, '启动工作流失败，请稍后重试。'));
     } finally {
       setSubmitting(false);
     }
@@ -590,8 +818,8 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
       setRun(nextRun);
       applyRunPayload(nextRun);
       setSelectedNodeId(resolveRunNodeId(nextRun));
-    } catch (err: any) {
-      setError(err?.response?.data?.error || err?.message || String(err));
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, '提交人工决策失败，请稍后重试。'));
     } finally {
       setSubmitting(false);
     }
@@ -599,9 +827,17 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
 
   const title = `${actionLabel[action]}${typeLabel[agentType]}工作流`;
   const isWorldCreate = isWorldWorkflow && action === 'create';
-  const contentRows = isWorldCreate ? 9 : agentType === 'chapter' ? 8 : 6;
+  const contentRows = isWorldCreate ? 9 : isChapterLike ? 8 : 6;
   const messageRows = isWorldCreate ? 5 : 3;
   const feedbackRows = isWorldCreate ? 6 : 4;
+  const worldviewPlacementText = useMemo(() => {
+    if (agentType !== 'worldview') return '';
+    if (action === 'update') {
+      return currentPath.trim() || '当前条目未记录层级路径';
+    }
+    const nextName = name.trim() || '新设定名称';
+    return parentPath.trim() ? `${parentPath.trim()} > ${nextName}` : nextName;
+  }, [action, agentType, currentPath, name, parentPath]);
 
   return (
     <Stack gap="md">
@@ -625,7 +861,7 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
       </Group>
 
       {error && (
-        <Alert color="red" icon={<IconCircleX size={18} />} title="错误未被隐藏">
+        <Alert color="red" icon={<IconCircleX size={18} />} title="请求失败">
           {error}
         </Alert>
       )}
@@ -655,11 +891,11 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
                   />
                 </Grid.Col>
               )}
-              {(agentType === 'outline' || agentType === 'chapter') && (
+              {(isOutlineLike || isChapterLike) && (
                 <Grid.Col span={{ base: 12, md: 6, xl: 3 }}>
                   <Select
                     label="世界观"
-                    data={worldviews.map((worldview) => ({ value: worldview.worldview_id, label: `${worldview.name} (${worldview.worldview_id})` }))}
+                    data={worldviews.map((worldview) => ({ value: worldview.worldview_id, label: getWorldviewDisplayName(worldview) }))}
                     value={selectedWorldviewId || null}
                     onChange={(value) => setSelectedWorldviewId(value || '')}
                     disabled={Boolean(run)}
@@ -667,7 +903,7 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
                   />
                 </Grid.Col>
               )}
-              {agentType === 'outline' && (
+              {isOutlineLike && (
                 <Grid.Col span={{ base: 12, md: 6, xl: 3 }}>
                   <Select
                     label="小说"
@@ -679,7 +915,7 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
                   />
                 </Grid.Col>
               )}
-              {agentType === 'chapter' && (
+              {isChapterLike && (
                 <Grid.Col span={{ base: 12, md: 6, xl: 3 }}>
                   <Select
                     label="大纲"
@@ -691,26 +927,104 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
                   />
                 </Grid.Col>
               )}
+              {isChapterCheck && (
+                <Grid.Col span={{ base: 12, md: 6, xl: 3 }}>
+                  <Select
+                    label="章节大纲来源"
+                    data={chapters.map((chapter) => ({
+                      value: chapterRecordId(chapter),
+                      label: `${chapter.name || chapter.title || chapterRecordId(chapter)} (${chapterRecordId(chapter)})`,
+                    }))}
+                    value={selectedChapterId || null}
+                    onChange={handleChapterOutlineSelect}
+                    disabled={Boolean(run)}
+                    searchable
+                    clearable
+                    placeholder="可选：从当前分卷章节大纲中带入"
+                  />
+                </Grid.Col>
+              )}
               <Grid.Col span={{ base: 12, md: 6, xl: 3 }}>
-                <TextInput label="名称" value={name} onChange={(event) => setName(event.currentTarget.value)} disabled={Boolean(run?.committed)} />
+                <TextInput
+                  label={isChapterCheck ? '检查任务名称（可选）' : isOutlineLike ? '卷名' : '名称'}
+                  placeholder={isOutlineLike ? '例如：第一卷：失踪者' : undefined}
+                  description={
+                    isOutlineLike && !name.trim() && outlineNameSuggestion
+                      ? `将自动使用正文中识别到的卷名：${outlineNameSuggestion}`
+                      : undefined
+                  }
+                  value={name}
+                  onChange={(event) => setName(event.currentTarget.value)}
+                  disabled={Boolean(run?.committed)}
+                />
               </Grid.Col>
+              {agentType === 'worldview' && (
+                <Grid.Col span={{ base: 12, md: 12, xl: 6 }}>
+                  <TextInput
+                    label={action === 'create' ? '新增后所在层级' : '当前层级路径'}
+                    value={worldviewPlacementText}
+                    description={
+                      action === 'create'
+                        ? (parentPath.trim()
+                          ? '该层级来自 /worldviews 中你点击的节点或设定条目。'
+                          : '未指定父级时会作为顶层世界观设定创建。')
+                        : '当前条目的层级路径只读展示；修改内容不会自动移动到其他目录。'
+                    }
+                    readOnly
+                    disabled
+                  />
+                </Grid.Col>
+              )}
             </Grid>
 
             {agentType === 'novel' && (
               <Textarea label="介绍" minRows={3} autosize value={introduction} onChange={(event) => setIntroduction(event.currentTarget.value)} disabled={Boolean(run?.committed)} />
             )}
 
-            {agentType === 'chapter' ? (
-              <Textarea label="章节内容" minRows={contentRows} autosize value={content} onChange={(event) => setContent(event.currentTarget.value)} disabled={Boolean(run?.committed)} />
+            {isChapterCheck ? (
+              <Stack gap="md">
+                <Textarea
+                  label="章节大纲"
+                  description="用于对照检查直接内容是否偏离当前章节规划。"
+                  minRows={6}
+                  autosize
+                  value={chapterOutline}
+                  onChange={(event) => setChapterOutline(event.currentTarget.value)}
+                  disabled={Boolean(run)}
+                />
+                <Textarea
+                  label="直接内容"
+                  description="输入需要检查的正文内容；该流程只输出检查结果，不写库。"
+                  minRows={contentRows}
+                  autosize
+                  value={content}
+                  onChange={(event) => setContent(event.currentTarget.value)}
+                  disabled={Boolean(run)}
+                />
+              </Stack>
+            ) : isChapterLike ? (
+              <Textarea label={chapterSummaryTypes.has(agentType) ? '章节原文' : '章节内容'} minRows={contentRows} autosize value={content} onChange={(event) => setContent(event.currentTarget.value)} disabled={Boolean(run?.committed)} />
             ) : (
-              <Textarea label="摘要/设定" minRows={contentRows} autosize value={summary} onChange={(event) => setSummary(event.currentTarget.value)} disabled={Boolean(run?.committed)} />
+              <Textarea
+                label={isOutlineLike ? (isSummaryWorkflow ? '分卷大纲原文' : '分卷大纲正文') : '摘要/设定'}
+                minRows={contentRows}
+                autosize
+                value={summary}
+                onChange={(event) => setSummary(event.currentTarget.value)}
+                disabled={Boolean(run?.committed)}
+              />
             )}
 
             <Textarea label="给 Agent 的消息" minRows={messageRows} autosize value={message} onChange={(event) => setMessage(event.currentTarget.value)} disabled={Boolean(run)} />
           </Stack>
+          {!run && startValidationError && !requiredContextError && (
+            <Alert color="yellow" icon={<IconCircleX size={18} />} title="启动前检查">
+              {startValidationError}
+            </Alert>
+          )}
           <Group justify="flex-end">
             <Button leftSection={<IconPlayerPlay size={16} />} loading={submitting} onClick={startWorkflow} disabled={Boolean(run) || Boolean(requiredContextError)}>
-              启动工作流
+              {isChapterCheck ? '启动检查工作流' : '启动工作流'}
             </Button>
           </Group>
         </Stack>
@@ -722,7 +1036,9 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
             <Title order={4}>工作流与节点信息</Title>
             <Group gap="xs">
               <Badge>当前节点：{currentNodeId}</Badge>
-              {run?.committed ? <Badge color="green">已写库</Badge> : <Badge color="gray">未写库</Badge>}
+              {isChapterCheck
+                ? <Badge color={run?.status === 'completed' ? 'green' : 'gray'}>{run?.status === 'completed' ? '已输出检查结果' : '待输出检查结果'}</Badge>
+                : run?.committed ? <Badge color="green">已写库</Badge> : <Badge color="gray">未写库</Badge>}
             </Group>
           </Group>
           <Grid gutter="md" align="stretch">
@@ -754,10 +1070,12 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
                 <Grid.Col span={{ base: 12, md: 6 }}>
                   <Paper p="md" withBorder>
                     <Group justify="space-between">
-                      <Text fw={800}>写库结果</Text>
-                      {run?.committed ? <Badge color="green">已写库</Badge> : <Badge color="gray">未写库</Badge>}
+                      <Text fw={800}>{isChapterCheck ? '检查结果' : '写库结果'}</Text>
+                      {isChapterCheck
+                        ? <Badge color={run?.status === 'completed' ? 'green' : 'gray'}>{run?.status === 'completed' ? '已输出' : '待输出'}</Badge>
+                        : run?.committed ? <Badge color="green">已写库</Badge> : <Badge color="gray">未写库</Badge>}
                     </Group>
-                    <Text size="sm" c="dimmed">人工批准前不会写库。</Text>
+                    <Text size="sm" c="dimmed">{isChapterCheck ? '该流程只输出检查结论，不执行任何写库操作。' : '人工批准前不会写库。'}</Text>
                   </Paper>
                 </Grid.Col>
               </Grid>
@@ -839,7 +1157,18 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
                         <Text size="sm">
                           返回字符数：{selectedLlmCall.raw_response_chars || 0}
                         </Text>
+                        {selectedLlmCall.prompt_chars ? (
+                          <Text size="sm">
+                            Prompt 字符数：{selectedLlmCall.prompt_chars}
+                          </Text>
+                        ) : null}
                       </Alert>
+                    )}
+                    {selectedLlmPrompt && (
+                      <>
+                        <Text size="xs" c="dimmed">LLM 语句</Text>
+                        <Code block>{selectedLlmPrompt}</Code>
+                      </>
                     )}
                     <Divider />
                     <Text size="xs" c="dimmed">输入</Text>
@@ -862,40 +1191,42 @@ export const HierarchyWorkflow: React.FC<HierarchyWorkflowProps> = ({ fixedType 
         </Stack>
       </Paper>
 
-      <Paper p="md" withBorder>
-        <Stack gap="sm">
-          <Title order={4}>用户处理</Title>
-          <Textarea label="对话反馈/修改意见" minRows={feedbackRows} autosize value={feedback} onChange={(event) => setFeedback(event.currentTarget.value)} />
-          <Group justify="space-between" align="flex-end">
-            <Box w={260} maw="100%">
-              <Select
-                label="修改模式"
-                data={revisionOptions}
-                value={revisionMode}
-                onChange={(value) => setRevisionMode((value as RevisionMode) || 'partial_rewrite')}
-                allowDeselect={false}
-              />
-            </Box>
-            <Group gap="sm">
-              <Button leftSection={<IconEdit size={16} />} variant="light" loading={submitting} disabled={!run || run.committed} onClick={() => respondWorkflow('request_changes')}>
-                提交修改
-              </Button>
-              <Button leftSection={<IconCircleCheck size={16} />} color="green" loading={submitting} disabled={!run || run.status !== 'waiting_human'} onClick={() => respondWorkflow('approve')}>
-                批准写库
-              </Button>
-              <Button color="red" variant="subtle" loading={submitting} disabled={!run || run.committed} onClick={() => respondWorkflow('reject')}>
-                中止
-              </Button>
+      {!isChapterCheck && (
+        <Paper p="md" withBorder>
+          <Stack gap="sm">
+            <Title order={4}>用户处理</Title>
+            <Textarea label="对话反馈/修改意见" minRows={feedbackRows} autosize value={feedback} onChange={(event) => setFeedback(event.currentTarget.value)} />
+            <Group justify="space-between" align="flex-end">
+              <Box w={260} maw="100%">
+                <Select
+                  label="修改模式"
+                  data={revisionOptions}
+                  value={revisionMode}
+                  onChange={(value) => setRevisionMode((value as RevisionMode) || 'partial_rewrite')}
+                  allowDeselect={false}
+                />
+              </Box>
+              <Group gap="sm">
+                <Button leftSection={<IconEdit size={16} />} variant="light" loading={submitting} disabled={!run || run.committed} onClick={() => respondWorkflow('request_changes')}>
+                  提交修改
+                </Button>
+                <Button leftSection={<IconCircleCheck size={16} />} color="green" loading={submitting} disabled={!run || run.status !== 'waiting_human'} onClick={() => respondWorkflow('approve')}>
+                  批准写库
+                </Button>
+                <Button color="red" variant="subtle" loading={submitting} disabled={!run || run.committed} onClick={() => respondWorkflow('reject')}>
+                  中止
+                </Button>
+              </Group>
             </Group>
-          </Group>
-        </Stack>
-      </Paper>
+          </Stack>
+        </Paper>
+      )}
 
       <Paper p="md" withBorder>
         <Group gap="xs">
           <IconSend size={16} />
           <Text size="sm" c="dimmed">
-            该页面是 {typeLabel[agentType]} 的独立工作流页。启动后节点、对话、审查和写库结果全部来自真实 `/api/hierarchy-agent/*` 接口。
+            该页面是 {typeLabel[agentType]} 的独立工作流页。启动后节点、对话、审查和{isChapterCheck ? '检查结果' : '写库结果'}全部来自真实 `/api/hierarchy-agent/*` 接口。
           </Text>
         </Group>
       </Paper>

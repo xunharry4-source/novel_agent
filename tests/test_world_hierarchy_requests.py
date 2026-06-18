@@ -71,15 +71,23 @@ def create_full_chain(suffix: str):
     assert queried_world["summary"] == world_summary, queried_world
 
     worldview_name = f"Strict Worldview {suffix}"
+    worldview_seed = assert_json_response(
+        requests.get(
+            f"{API_PREFIX}/worldviews/list",
+            params={"world_id": world_id, "page": 1, "page_size": 10},
+            timeout=TIMEOUT,
+        )
+    )
+    assert len(worldview_seed) == 1, worldview_seed
+    worldview_id = worldview_seed[0]["worldview_id"]
     worldview = assert_json_response(
         requests.post(
-            f"{API_PREFIX}/worldviews/create",
-            json={"name": worldview_name, "summary": f"WV Summary {suffix}", "world_id": world_id},
+            f"{API_PREFIX}/worldviews/update",
+            json={"worldview_id": worldview_id, "name": worldview_name, "summary": f"WV Summary {suffix}"},
             timeout=TIMEOUT,
         )
     )
     assert worldview.get("status") == "success", worldview
-    worldview_id = worldview["worldview_id"]
     queried_worldview = get_worldview(worldview_id)
     assert queried_worldview["name"] == worldview_name, queried_worldview
     assert queried_worldview["world_id"] == world_id, queried_worldview

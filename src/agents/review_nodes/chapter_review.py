@@ -10,7 +10,7 @@ from src.agents.review_nodes.novel_review import make_novel_review_node, make_no
 from src.agents.review_nodes.outline_review import make_outline_review_node, make_outline_review_route
 from src.agents.review_nodes.world_review import make_world_review_node, make_world_review_route
 from src.agents.review_nodes.worldview_review import make_worldview_review_node, make_worldview_review_route
-from src.agents.review_agent import execute_llm_review
+from src.agents.review_agent import execute_llm_review_detail
 from src.common.lore_utils import get_mongodb_db
 
 
@@ -28,9 +28,11 @@ def make_chapter_review_node(
         """章节审查节点：调用 LLM 比对当前章节和此前章节的剧情、人物、时间线与承接关系。"""
         db = get_mongodb_db()
         payload = dict(state.get("pending_payload") or {})
-        passed, errors = execute_llm_review(db, "chapter_consistency", payload)
+        review_detail = execute_llm_review_detail(db, "chapter_consistency", payload)
+        passed = bool(review_detail.get("passed"))
+        errors = list(review_detail.get("errors") or [])
         nodes = list(state.get("nodes") or [])
-        nodes.append(node_factory("chapter_review", "completed" if passed else "failed", {"payload": payload}, {"passed": passed, "errors": errors, "reviewer": "chapter_consistency_review_agent"}))
+        nodes.append(node_factory("chapter_review", "completed" if passed else "failed", {"payload": payload}, {"passed": passed, "errors": errors, "reviewer": "chapter_consistency_review_agent", "llm_invoked": review_detail.get("llm_invoked"), "llm_call": review_detail.get("llm_call"), "raw_response": review_detail.get("raw_response", "")}))
         waiting_human = int(state.get("iterations") or 0) >= max_auto_review_iterations
         return {
             "chapter_review_passed": passed,

@@ -26,6 +26,71 @@ export const clearAuthCredentials = () => {
   clearApiKey();
 };
 
+const extractApiErrorDetail = (data: unknown): string => {
+  if (!data) return '';
+  if (typeof data === 'string') return data;
+  if (typeof data === 'object') {
+    const record = data as Record<string, unknown>;
+    const direct = record.error ?? record.message ?? record.detail;
+    if (typeof direct === 'string') return direct;
+  }
+  return '';
+};
+
+export const getApiErrorMessage = (error: unknown, fallback = '请求失败，请稍后重试。'): string => {
+  if (axios.isAxiosError(error)) {
+    const status = error.response?.status;
+    const responseDetail = extractApiErrorDetail(error.response?.data);
+    const rawMessage = responseDetail || error.message || '';
+    const combined = `${rawMessage} ${String(error.cause ?? '')}`.toLowerCase();
+
+    if (
+      combined.includes('127.0.0.1:27017') ||
+      combined.includes('localhost:27017') ||
+      combined.includes('topology description') ||
+      combined.includes('autoreconnect')
+    ) {
+      return '后端数据服务暂不可用，请确认本地 MongoDB 已启动，并监听 127.0.0.1:27017。';
+    }
+
+    if (
+      !error.response ||
+      combined.includes('econnrefused') ||
+      combined.includes('network error') ||
+      (status === 500 && rawMessage.toLowerCase().includes('request failed with status code 500'))
+    ) {
+      return '后端接口暂不可用，请确认本地后端服务已经启动，并监听 127.0.0.1:5006。';
+    }
+
+    if (typeof responseDetail === 'string' && responseDetail.trim()) {
+      return responseDetail;
+    }
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  if (typeof error === 'string' && error.trim()) {
+    return error;
+  }
+
+  return fallback;
+};
+
+export const getApiErrorStatus = (error: unknown): number | null => {
+  if (!axios.isAxiosError(error)) return null;
+  return error.response?.status ?? null;
+};
+
+export const isApiNotFoundError = (error: unknown, detailIncludes?: string): boolean => {
+  if (!axios.isAxiosError(error)) return false;
+  if (error.response?.status !== 404) return false;
+  if (!detailIncludes) return true;
+  const detail = extractApiErrorDetail(error.response?.data);
+  return detail.includes(detailIncludes);
+};
+
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -66,7 +131,18 @@ export const api = {
   getLore: (params?: { worldview_id?: string; outline_id?: string }) => 
     apiClient.get('/api/lore/all', { params }),
 
-  listLore: (params: { worldview_id?: string; outline_id?: string; novel_id?: string; world_id?: string; query?: string; page: number; page_size: number }) =>
+  listLore: (params: {
+    worldview_id?: string;
+    outline_id?: string;
+    chapter_outline_id?: string;
+    chapter_outline_mode?: 'root' | 'child';
+    novel_id?: string;
+    world_id?: string;
+    type?: string;
+    query?: string;
+    page: number;
+    page_size: number;
+  }) =>
     apiClient.get('/api/lore/list', { params }),
 
   listWorldviews: (params: { world_id?: string; worldview_id?: string; query?: string; page: number; page_size: number }) =>
@@ -86,14 +162,8 @@ export const api = {
   deleteWorld: (data: { world_id: string; cascade?: boolean }) =>
     apiClient.delete('/api/worlds/delete', { data }),
 
-  createWorldview: (data: { name: string; summary?: string; world_id: string }) =>
-    apiClient.post('/api/worldviews/create', data),
-
   updateWorldview: (data: { worldview_id: string; name?: string; summary?: string; world_id?: string }) =>
     apiClient.post('/api/worldviews/update', data),
-
-  deleteWorldview: (data: { worldview_id: string; cascade?: boolean }) =>
-    apiClient.delete('/api/worldviews/delete', { data }),
 
   listNovels: (params: { world_id?: string; novel_id?: string; query?: string; page: number; page_size: number }) =>
     apiClient.get('/api/novels/list', { params }),
@@ -114,8 +184,19 @@ export const api = {
     apiClient.get('/api/world-hierarchy/tree', { params }),
 
   startHierarchyAgent: (data: {
-    agent_type: 'world' | 'worldview' | 'novel' | 'outline' | 'chapter';
-    action: 'create' | 'update' | 'delete';
+    agent_type:
+      | 'world'
+      | 'worldview'
+      | 'novel'
+      | 'outline'
+      | 'chapter'
+      | 'outline_summary_create'
+      | 'outline_summary_update'
+      | 'chapter_outline_summary_create'
+      | 'chapter_outline_summary_update'
+      | 'chapter_content_summary_create'
+      | 'chapter_content_summary_update';
+    action: 'create' | 'update' | 'check' | 'delete';
     message?: string;
     payload: Record<string, unknown>;
   }) => apiClient.post('/api/hierarchy-agent/start', data),
@@ -135,6 +216,22 @@ export const api = {
   listHierarchyAgents: (params: { agent_type?: string; status?: string; run_id?: string; page: number; page_size: number }) =>
     apiClient.get('/api/hierarchy-agent/list', { params }),
 
+  listDownstreamSummaries: (params: {
+    summary_id?: string;
+    summary_key?: string;
+    agent_type?: string;
+    summary_scope?: string;
+    summary_action?: string;
+    world_id?: string;
+    worldview_id?: string;
+    novel_id?: string;
+    outline_id?: string;
+    chapter_id?: string;
+    target_id?: string;
+    page: number;
+    page_size: number;
+  }) => apiClient.get('/api/downstream-summaries/list', { params }),
+
   listOutlines: (params: { world_id?: string; worldview_id?: string; novel_id?: string; outline_id?: string; id?: string; query?: string; page: number; page_size: number }) =>
     apiClient.get('/api/outlines/list', { params }),
 
@@ -147,10 +244,12 @@ export const api = {
     name?: string;
     content?: string;
     category?: string;
+    path?: string;
     world_id?: string;
     worldview_id?: string;
     novel_id?: string;
     outline_id?: string;
+    chapter_outline_id?: string;
   }) => apiClient.post('/api/archive/update', data),
 
   deleteArchiveItem: (data: {
@@ -160,6 +259,7 @@ export const api = {
     worldview_id?: string;
     novel_id?: string;
     outline_id?: string;
+    chapter_outline_id?: string;
     cascade?: boolean;
   }) => apiClient.delete('/api/archive/delete', { data }),
 

@@ -18,6 +18,8 @@ from src.common.lore_utils import get_langfuse_callback, get_llm, get_mongodb_db
 
 
 AGENT_NAME = "chapter_agent"
+INITIAL_EXPANSION_AGENT_NAME = "chapter_agent_initial_expansion"
+MODIFY_CONTENT_AGENT_NAME = "chapter_agent_modify_content"
 ENTITY_TYPE = "chapter"
 PRIMARY_FIELD = "content"
 MAX_AUTO_REVIEW_ITERATIONS = 3
@@ -185,21 +187,23 @@ def _extract_llm_content(response: Any) -> str:
     return str(content or "")
 
 
-def _llm_metadata(raw_content: str) -> Dict[str, Any]:
+def _llm_metadata(raw_content: str, prompt: str, llm_agent_name: str) -> Dict[str, Any]:
     """生成本次 chapter_agent LLM 调用的中文可审计元数据。"""
     config = get_config()
     provider = str(config.get("LLM_PROVIDER", "ollama")).lower()
-    agent_config = (config.get("AGENT_MODELS") or {}).get(AGENT_NAME) or {}
+    agent_config = (config.get("AGENT_MODELS") or {}).get(llm_agent_name) or {}
+    if not agent_config:
+        agent_config = (config.get("AGENT_MODELS") or {}).get(AGENT_NAME) or {}
     model_name = agent_config.get("model") if isinstance(agent_config, dict) else agent_config
     provider_config = (config.get("LLM_MODELS") or {}).get(provider) or {}
     if isinstance(provider_config, dict) and not model_name:
         model_name = provider_config.get("default")
-    return {"llm_invoked": True, "llm_agent_name": AGENT_NAME, "provider": provider, "model": model_name or config.get("DEFAULT_MODEL"), "json_mode": True, "raw_response_chars": len(raw_content)}
+    return {"llm_invoked": True, "llm_agent_name": llm_agent_name, "provider": provider, "model": model_name or config.get("DEFAULT_MODEL"), "json_mode": True, "raw_response_chars": len(raw_content), "prompt": prompt, "prompt_chars": len(prompt)}
 
 
-def _invoke_llm(prompt: str) -> tuple[str, Dict[str, Any]]:
+def _invoke_llm(prompt: str, *, llm_agent_name: str) -> tuple[str, Dict[str, Any]]:
     """真实调用 chapter_agent 对应 LLM；空响应直接报错，禁止伪成功。"""
-    llm = get_llm(json_mode=True, agent_name=AGENT_NAME)
+    llm = get_llm(json_mode=True, agent_name=llm_agent_name)
     config: Dict[str, Any] = {}
     callback = get_langfuse_callback()
     if callback:
@@ -207,8 +211,50 @@ def _invoke_llm(prompt: str) -> tuple[str, Dict[str, Any]]:
     response = llm.invoke(prompt, config=config if config else None)
     raw_content = _extract_llm_content(response)
     if not raw_content.strip():
-        raise ValueError(f"{AGENT_NAME} returned empty LLM response")
-    return raw_content, _llm_metadata(raw_content)
+        raise ValueError(f"{llm_agent_name} returned empty LLM response")
+    return raw_content, _llm_metadata(raw_content, prompt, llm_agent_name)
+
+
+def _chapter_seed(payload: Dict[str, Any]) -> str:
+    return str(payload.get("content", "") or payload.get("summary", "") or "")
+
+
+def _normalize_chapter_text(text: Any) -> str:
+    return "\n".join(line.strip() for line in str(text or "").splitlines() if line.strip())
+
+
+def _assert_chapter_not_simplified(source_text: Any, candidate_text: Any, *, stage: str) -> None:
+    source = _normalize_chapter_text(source_text)
+    candidate = _normalize_chapter_text(candidate_text)
+    if not source or not candidate:
+        return
+    source_len = len(source)
+    candidate_len = len(candidate)
+    if source_len >= 1200 and candidate_len < int(source_len * 0.85):
+        raise ValueError(
+            f"{AGENT_NAME} {stage} compressed long chapter too aggressively: "
+            f"input_chars={source_len}, output_chars={candidate_len}"
+        )
+
+
+def _build_chapter_task_context(
+    action: str,
+    payload: Dict[str, Any],
+    message: str,
+    *,
+    revision_mode: Optional[str],
+    feedback: str,
+    expansion_error: str = "",
+) -> str:
+    task_context = {
+        "action": action,
+        "message": message,
+        "revision_mode": revision_mode or "initial_expansion",
+        "feedback": feedback,
+        "expansion_error": expansion_error,
+        "payload": payload or {},
+    }
+    return json.dumps(task_context, ensure_ascii=False, indent=2)
 
 
 def _node(node_id: str, status: str, node_input: Dict[str, Any], output: Dict[str, Any]) -> Dict[str, Any]:
@@ -219,58 +265,169 @@ def _node(node_id: str, status: str, node_input: Dict[str, Any], output: Dict[st
 
 
 def build_initial_expansion_prompt(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str], feedback: str) -> str:
-    """构造 chapter_agent 初始扩充 Prompt，专门整理章节正文输入。"""
-    return f"""你是 chapter_agent 的初始扩充节点，只负责大纲下的章节正文输入整理。
-禁止使用通用 Agent 口径。禁止改写世界规则、小说主线或大纲结局。禁止写库。禁止返回解释文字。
+    """构造 chapter_agent 初始扩充 Prompt，使用结构化模板明确章节任务。"""
+    task_context = _build_chapter_task_context(action, payload or {}, message, revision_mode=revision_mode, feedback=feedback)
+    return f"""【角色设定】
+你是一名小说章节扩写编辑。
 
-【业务动作】{action}
-【父级大纲 outline_id】{payload.get("outline_id", "")}
-【所属小说 novel_id】{payload.get("novel_id", "")}
-【所属世界 world_id】{payload.get("world_id", "")}
-【约束 worldview_id】{payload.get("worldview_id", "")}
-【章节 ID】{payload.get("chapter_id", "") or payload.get("id", "") or payload.get("target_id", "")}
-【用户消息】{message}
-【人工反馈】{feedback}
-【修改模式】{revision_mode or "initial_expansion"}
-【原始 payload】
-{json.dumps(payload or {}, ensure_ascii=False, indent=2)}
+你的任务是：
+保留原有章节全部内容，
+并在此基础上扩写细节、动作、情绪、对话、因果链和场景过程。
 
-任务：
-1. 保留 outline_id、novel_id、worldview_id、world_id、chapter_id、id、target_id 和用户指定片段。
-2. 整理场景目标、人物状态、叙事视角、上下文承接、目标片段和不得违反的设定约束。
-3. 输出必须是可直接提交审查的章节 payload，但不得写库。
+────────────────────────
+
+【输入说明】
+用户提供：
+* outline_id
+* novel_id
+* world_id
+* worldview_id
+* 章节草稿（content 或 summary）
+
+其中：
+content / summary 为原始章节正文。
+
+【任务上下文】
+{task_context}
+
+────────────────────────
+
+【扩写规则】
+本任务是：扩写（Expand）
+不是：
+* 总结
+* 概括
+* 提炼
+* 压缩
+* 重写
+
+必须保留：
+* 所有已写出的场景
+* 所有已写出的事件
+* 所有已写出的人物行为
+* 所有已写出的冲突
+* 所有已写出的对话
+* 所有已写出的伏笔
+
+不得删除。
+不得跳过。
+不得把多个场景合并成概述。
+
+────────────────────────
+
+【扩写内容】
+优先扩写已有正文。
+增加：
+* 动作过程
+* 冲突升级过程
+* 人物行为逻辑
+* 情绪变化
+* 对话展开
+* 场景衔接
+* 因果链
+* 阶段结果
+* 后续影响
+
+禁止只改措辞。
+禁止同义改写。
+
+────────────────────────
+
+【因果链规则】
+重要段落尽量补充：
+起因
+→ 触发
+→ 发展
+→ 结果
+→ 影响
+
+────────────────────────
+
+【世界观规则】
+扩写内容必须遵守父级 outline / novel / world / worldview 的全部约束。
+不得新增违反约束的设定。
+
+────────────────────────
+
+【长度规则】
+扩写后内容长度：
+不得低于原文。
+优先达到原文 150% 以上。
+
+如果无法扩写：
+必须保留原文。
+
+禁止输出比输入更短。
+
+────────────────────────
+
+【输出规则】
+payload.content：
+写扩写后的完整章节正文。
+不是摘要。
+不是概述。
+不是总结。
+必须保留全部原剧情并增加细节。
+
+expanded_input.content_seed：
+写用户提交的原始章节全文。
+原文不得修改。
+
+────────────────────────
+
+【执行顺序】
+Review：
+检查父级约束与正文完整性。
+
+Expand：
+保留原文并扩写。
+
+Validate：
+检查是否遗漏原剧情，是否出现摘要化。
+
+【输入信息】
+【说明】
+请严格按照上面的执行顺序完成任务。
+
+【输出要求】
+1. 只返回合法 JSON，不得返回解释文字，不得写库。
+2. 必须保留 outline_id、novel_id、worldview_id、world_id、chapter_id、id、target_id 和用户指定片段。
+3. `payload.content` 必须是扩写后的完整章节正文，不得摘要化、概述化、压缩化。
+4. `expanded_input.content_seed` 必须保留用户提交的原始章节全文，不得改写。
+5. 输出必须聚焦章节正文，不得漂移到世界规则、小说主线重设或大纲结局改写。
+6. 输出 JSON 示例里的占位符只是结构说明，不是让你原样输出这些方括号文字。
 
 只返回合法 JSON：
 {{
   "metadata": {{"agent": "chapter_agent", "node": "initial_expansion", "entity_type": "chapter", "action": "{action}"}},
   "payload": {{
-    "outline_id": "{payload.get("outline_id", "")}",
-    "novel_id": "{payload.get("novel_id", "")}",
-    "world_id": "{payload.get("world_id", "")}",
-    "worldview_id": "{payload.get("worldview_id", "")}",
-    "chapter_id": "{payload.get("chapter_id", "")}",
-    "id": "{payload.get("id", "")}",
-    "target_id": "{payload.get("target_id", "")}",
-    "name": "章节标题",
-    "content": "章节正文"
+    "outline_id": "[保留输入中的 outline_id]",
+    "novel_id": "[保留输入中的 novel_id]",
+    "world_id": "[保留输入中的 world_id]",
+    "worldview_id": "[保留输入中的 worldview_id]",
+    "chapter_id": "[保留输入中的 chapter_id]",
+    "id": "[保留输入中的 id]",
+    "target_id": "[保留输入中的 target_id]",
+    "name": "[章节标题]",
+    "content": "[扩写后的完整章节正文]"
   }},
   "expanded_input": {{
-    "outline_id": "{payload.get("outline_id", "")}",
-    "novel_id": "{payload.get("novel_id", "")}",
-    "world_id": "{payload.get("world_id", "")}",
-    "worldview_id": "{payload.get("worldview_id", "")}",
-    "chapter_id": "{payload.get("chapter_id", "")}",
-    "id": "{payload.get("id", "")}",
-    "target_id": "{payload.get("target_id", "")}",
-    "name": "{payload.get("name", "")}",
-    "content_seed": "{payload.get("content", "") or payload.get("summary", "")}",
-    "scene_goal": "本章场景目标",
-    "character_states": ["人物状态"],
-    "narrative_viewpoint": "叙事视角",
-    "target_segments": ["用户点名的目标片段"],
-    "continuity_constraints": ["上下文承接和设定约束"]
+    "outline_id": "[保留输入中的 outline_id]",
+    "novel_id": "[保留输入中的 novel_id]",
+    "world_id": "[保留输入中的 world_id]",
+    "worldview_id": "[保留输入中的 worldview_id]",
+    "chapter_id": "[保留输入中的 chapter_id]",
+    "id": "[保留输入中的 id]",
+    "target_id": "[保留输入中的 target_id]",
+    "name": "[章节标题]",
+    "content_seed": "[用户提交的原始章节全文]",
+    "scene_goal": "[本章扩写目标]",
+    "character_states": ["[人物状态]"],
+    "narrative_viewpoint": "[叙事视角]",
+    "target_segments": ["[重点扩写的段落或场景]"],
+    "continuity_constraints": ["[必须遵守的上下文承接和设定约束]"]
   }},
-  "expansion_notes": "初始扩充节点整理了哪些正文生成约束"
+  "expansion_notes": "[本轮章节扩写补强了哪些内容]"
 }}
 """
 
@@ -278,7 +435,7 @@ def build_initial_expansion_prompt(action: str, payload: Dict[str, Any], message
 def generate_initial_expansion(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str] = None, feedback: str = "") -> Dict[str, Any]:
     """调用 LLM 生成章节初始扩充结果，确保第二节点真实使用 chapter_agent LLM。"""
     prompt = build_initial_expansion_prompt(action, payload or {}, message, revision_mode=revision_mode, feedback=feedback)
-    raw_content, llm_call = _invoke_llm(prompt)
+    raw_content, llm_call = _invoke_llm(prompt, llm_agent_name=INITIAL_EXPANSION_AGENT_NAME)
     parsed = parse_json_safely(raw_content)
     if not isinstance(parsed, dict):
         raise ValueError(f"{AGENT_NAME} initial expansion returned non-object JSON: {raw_content[:500]}")
@@ -288,55 +445,178 @@ def generate_initial_expansion(action: str, payload: Dict[str, Any], message: st
         raise ValueError(f"{AGENT_NAME} initial expansion missing payload object: {raw_content[:500]}")
     if not isinstance(expanded_input, dict):
         expanded_input = {}
+    _assert_chapter_not_simplified(_chapter_seed(payload), initial_payload.get("content", ""), stage="initial_expansion")
     if payload.get("name") and revision_mode != "full_rewrite":
         initial_payload["name"] = payload["name"]
-    return {"payload": initial_payload, "expanded_input": expanded_input, "llm_invoked": True, "agent_name": AGENT_NAME, "llm_agent_name": AGENT_NAME, "llm_call": llm_call, "raw_response": raw_content, "parsed_response": parsed, "expansion_notes": parsed.get("expansion_notes", "")}
+    return {"payload": initial_payload, "expanded_input": expanded_input, "llm_invoked": True, "agent_name": INITIAL_EXPANSION_AGENT_NAME, "llm_agent_name": INITIAL_EXPANSION_AGENT_NAME, "llm_call": llm_call, "raw_response": raw_content, "parsed_response": parsed, "expansion_notes": parsed.get("expansion_notes", "")}
 
 
 def build_modification_prompt(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str], feedback: str, expansion_error: str = "") -> str:
-    """构造 chapter_agent 修改内容 Prompt，只允许按反馈修正大纲下的章节正文。"""
+    """构造 chapter_agent 修改内容 Prompt，使用结构化模板明确局部修正任务。"""
     rag_context = get_unified_context(
         f"{message}\n{payload.get('name', '')}\n{payload.get('content', '') or payload.get('summary', '')}",
         outline_id=str(payload.get("outline_id") or "default"),
         worldview_id=str(payload.get("worldview_id") or "default_wv"),
     )
-    retry_clause = f"\n【审查失败原因】{expansion_error}\n必须在不改变父级设定的前提下修正正文。" if expansion_error else ""
-    return f"""你是 chapter_agent 的修改内容节点，只负责按反馈修正指定 outline_id 下的章节正文。
-禁止改写世界规则、小说主线或大纲结局。禁止写库。禁止返回解释文字。
+    task_context = _build_chapter_task_context(
+        action,
+        payload or {},
+        message,
+        revision_mode=revision_mode,
+        feedback=feedback,
+        expansion_error=expansion_error,
+    )
+    return f"""【角色设定】
+你是一名小说章节修订编辑。
 
-【业务动作】{action}
-【父级大纲 outline_id】{payload.get("outline_id", "")}
-【所属小说 novel_id】{payload.get("novel_id", "")}
-【所属世界 world_id】{payload.get("world_id", "")}
-【约束 worldview_id】{payload.get("worldview_id", "")}
-【章节 ID】{payload.get("chapter_id", "") or payload.get("id", "") or payload.get("target_id", "")}
-【用户消息】{message}
-【人工反馈或审查意见】{feedback}
-【修改模式】{revision_mode or "partial_rewrite"}
-【当前 payload】
-{json.dumps(payload or {}, ensure_ascii=False, indent=2)}
+你的任务是：
+保留原有章节全部内容，
+根据修改意见修正指定问题，
+并在必要时补强细节、动作、情绪、对话和因果链。
+
+────────────────────────
+
+【输入说明】
+用户提供：
+* outline_id
+* novel_id
+* world_id
+* worldview_id
+* 原始章节（content 或 summary）
+* 修改意见
+
+其中：
+content / summary 为当前完整章节正文。
+
+【任务上下文】
+{task_context}
+
 【RAG 上下文】
-{rag_context}{retry_clause}
+{rag_context}
 
-修改规则：
-1. 只修正审查失败原因或人工反馈要求修改的内容，正文仍必须包含场景、行动、对话和心理活动。
-2. 严格继承前文场景、人物状态、大纲任务和既定设定。
-3. partial_rewrite 只修改用户点名的段落、情节或句子。
-4. 必须保留 outline_id、novel_id、worldview_id、world_id、chapter_id、id、target_id。
+────────────────────────
+
+【修改规则】
+本任务是：修改并扩写（Modify + Expand）
+不是：
+* 总结
+* 概括
+* 提炼
+* 压缩
+* 全盘重写
+
+必须保留：
+* 所有未被要求删除的场景
+* 所有未被要求删除的事件
+* 所有未被要求删除的人物行为
+* 所有未被要求删除的冲突
+* 所有未被要求删除的对话
+* 所有未被要求删除的伏笔
+
+不得删除未被点名修改的内容。
+不得跳过原剧情。
+不得把多个场景合并成概述。
+
+────────────────────────
+
+【修改内容】
+优先处理修改意见直接点名的问题。
+然后在相关位置补强：
+* 动作过程
+* 冲突升级过程
+* 人物行为逻辑
+* 情绪变化
+* 对话展开
+* 场景衔接
+* 因果链
+* 阶段结果
+* 后续影响
+
+禁止只修改措辞。
+禁止同义改写。
+
+────────────────────────
+
+【因果链规则】
+重要段落尽量补充：
+起因
+→ 触发
+→ 发展
+→ 结果
+→ 影响
+
+────────────────────────
+
+【世界观规则】
+修改后的内容必须遵守父级 outline / novel / world / worldview 的全部约束。
+不得新增违反约束的设定。
+
+────────────────────────
+
+【长度规则】
+修改后内容长度：
+不得低于原文。
+
+如果修改范围很小，
+至少保留原文总量不缩短。
+
+禁止输出比输入更短。
+
+────────────────────────
+
+【输出规则】
+payload.content：
+写修改并补强后的完整章节正文。
+不是摘要。
+不是概述。
+不是总结。
+必须保留全部未被要求删除的原剧情。
+
+────────────────────────
+
+【执行顺序】
+Review：
+检查父级约束与修改意见。
+
+Modify：
+先按修改意见修正。
+
+Expand：
+只在相关位置补强细节。
+
+Validate：
+检查是否遗漏原剧情，是否误删未被点名修改内容。
+
+如果发现输出比原文更短，
+或出现摘要化倾向，
+重新生成。
+
+────────────────────────
+
+【输入信息】
+【说明】
+请严格按照上面的执行顺序完成任务。
+
+【输出要求】
+1. 只返回合法 JSON，不得返回解释文字，不得写库。
+2. 必须保留 outline_id、novel_id、worldview_id、world_id、chapter_id、id、target_id 和 name。
+3. `payload.content` 必须是修改并补强后的完整章节正文，不得摘要化、概述化、压缩化。
+4. 必须严格继承前文场景、人物状态、大纲任务和既定设定。
+5. 输出 JSON 示例里的占位符只是结构说明，不是让你原样输出这些方括号文字。
 
 只返回合法 JSON：
 {{
   "metadata": {{"agent": "chapter_agent", "node": "modify_content", "entity_type": "chapter", "action": "{action}"}},
   "payload": {{
-    "outline_id": "{payload.get("outline_id", "")}",
-    "novel_id": "{payload.get("novel_id", "")}",
-    "world_id": "{payload.get("world_id", "")}",
-    "worldview_id": "{payload.get("worldview_id", "")}",
-    "chapter_id": "{payload.get("chapter_id", "")}",
-    "id": "{payload.get("id", "")}",
-    "target_id": "{payload.get("target_id", "")}",
-    "name": "章节标题",
-    "content": "章节正文"
+    "outline_id": "[保留输入中的 outline_id]",
+    "novel_id": "[保留输入中的 novel_id]",
+    "world_id": "[保留输入中的 world_id]",
+    "worldview_id": "[保留输入中的 worldview_id]",
+    "chapter_id": "[保留输入中的 chapter_id]",
+    "id": "[保留输入中的 id]",
+    "target_id": "[保留输入中的 target_id]",
+    "name": "[章节标题]",
+    "content": "[按修改意见修正并补强后的完整章节正文]"
   }},
   "modification_notes": "chapter_agent 本轮修正的正文范围",
   "change_summary": "相对输入 payload 的变化摘要"
@@ -347,16 +627,17 @@ def build_modification_prompt(action: str, payload: Dict[str, Any], message: str
 def generate_content_modification(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str] = None, feedback: str = "", expansion_error: str = "") -> Dict[str, Any]:
     """调用 LLM 根据审查意见或人工反馈修改章节正文内容。"""
     prompt = build_modification_prompt(action, payload or {}, message, revision_mode=revision_mode, feedback=feedback, expansion_error=expansion_error)
-    raw_content, llm_call = _invoke_llm(prompt)
+    raw_content, llm_call = _invoke_llm(prompt, llm_agent_name=MODIFY_CONTENT_AGENT_NAME)
     parsed = parse_json_safely(raw_content)
     if not isinstance(parsed, dict):
         raise ValueError(f"{AGENT_NAME} modification returned non-object JSON: {raw_content[:500]}")
     modified_payload = parsed.get("payload")
     if not isinstance(modified_payload, dict):
         raise ValueError(f"{AGENT_NAME} modification missing payload object: {raw_content[:500]}")
+    _assert_chapter_not_simplified(_chapter_seed(payload), modified_payload.get("content", ""), stage="modify_content")
     if payload.get("name") and revision_mode != "full_rewrite":
         modified_payload["name"] = payload["name"]
-    return {"payload": modified_payload, "llm_invoked": True, "agent_name": AGENT_NAME, "llm_agent_name": AGENT_NAME, "llm_call": llm_call, "raw_response": raw_content, "parsed_response": parsed, "modification_notes": parsed.get("modification_notes", ""), "change_summary": parsed.get("change_summary", "")}
+    return {"payload": modified_payload, "llm_invoked": True, "agent_name": MODIFY_CONTENT_AGENT_NAME, "llm_agent_name": MODIFY_CONTENT_AGENT_NAME, "llm_call": llm_call, "raw_response": raw_content, "parsed_response": parsed, "modification_notes": parsed.get("modification_notes", ""), "change_summary": parsed.get("change_summary", "")}
 
 
 def input_node(state: ChapterAgentState) -> ChapterAgentState:
@@ -451,7 +732,18 @@ def commit_node(state: ChapterAgentState) -> ChapterAgentState:
     payload = dict(state.get("pending_payload") or {})
     if action == "create":
         chapter_id = payload.get("chapter_id") or payload.get("id") or f"chapter_{uuid.uuid4().hex[:8]}"
-        doc = {"id": chapter_id, "scene_id": chapter_id, "type": "prose", "title": payload["name"], "content": payload.get("content", ""), "outline_id": payload["outline_id"], "novel_id": payload.get("novel_id"), "worldview_id": payload.get("worldview_id"), "world_id": payload.get("world_id")}
+        doc = {
+            "id": chapter_id,
+            "scene_id": chapter_id,
+            "type": "prose",
+            "title": payload["name"],
+            "content": payload.get("content", ""),
+            "outline_id": payload["outline_id"],
+            "chapter_outline_id": payload.get("chapter_outline_id"),
+            "novel_id": payload.get("novel_id"),
+            "worldview_id": payload.get("worldview_id"),
+            "world_id": payload.get("world_id"),
+        }
         db["prose"].insert_one(doc)
         result = doc
     elif action == "update":
@@ -461,6 +753,8 @@ def commit_node(state: ChapterAgentState) -> ChapterAgentState:
             update["title"] = payload["name"]
         if "content" in payload:
             update["content"] = payload["content"]
+        if "chapter_outline_id" in payload:
+            update["chapter_outline_id"] = payload.get("chapter_outline_id")
         db["prose"].update_one({"$or": [{"id": target_id}, {"scene_id": target_id}, {"prose_id": target_id}]}, {"$set": update})
         result = {"id": target_id, **update}
     else:

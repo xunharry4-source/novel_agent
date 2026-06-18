@@ -39,6 +39,7 @@ import {
   IconTrash,
 } from '@tabler/icons-react';
 import { api, apiClient } from '../api/client';
+import { getWorldviewDisplayName } from '../utils/worldview';
 
 type Outline = {
   outline_id: string;
@@ -71,7 +72,8 @@ type World = {
 type Worldview = {
   worldview_id: string;
   world_id: string;
-  name: string;
+  name?: string;
+  title?: string;
   summary?: string;
 };
 
@@ -91,8 +93,11 @@ type WorkflowLog = {
 
 type HumanMode = 'delete-outline' | 'delete-chapter';
 
-const toOptions = <T extends Record<string, string>>(items: T[], valueKey: keyof T, labelKey: keyof T) =>
-  items.map((item) => ({ value: String(item[valueKey]), label: String(item[labelKey]) }));
+const toOptions = <T extends Record<string, string | undefined>>(items: T[], valueKey: keyof T, labelKey: keyof T) =>
+  items.map((item) => ({ value: String(item[valueKey] || ''), label: String(item[labelKey] || '') }));
+
+const toWorldviewOptions = (items: Worldview[]) =>
+  items.map((item) => ({ value: item.worldview_id, label: getWorldviewDisplayName(item) }));
 
 const uniqueWorldsById = (items: World[]): World[] => {
   const seen = new Set<string>();
@@ -649,7 +654,7 @@ export const OutlineChapterWorkflow: React.FC = () => {
 
   const importWorldviewHierarchy = async () => {
     if (!selectedWorldId || !importWorldviewId || !importFile) {
-      setError('导入世界观必须选择世界、世界观，并选择 json/md/opml 文件');
+      setError('导入世界观必须选择世界、世界观，并选择 json/md/xml/opml 文件');
       return;
     }
     setImporting(true);
@@ -754,7 +759,7 @@ export const OutlineChapterWorkflow: React.FC = () => {
                 />
                 <Select
                   label="世界观"
-                  data={toOptions(worldviews, 'worldview_id', 'name')}
+                  data={toWorldviewOptions(worldviews)}
                   value={selectedWorldview || null}
                   onChange={(value) => {
                     setSelectedWorldview(value || '');
@@ -920,7 +925,7 @@ export const OutlineChapterWorkflow: React.FC = () => {
       <Modal opened={importModalOpen} onClose={() => setImportModalOpen(false)} title="导入世界观层级" size="lg">
         <Stack gap="sm">
           <Alert color="blue">
-            支持 JSON、Markdown、OPML。导入会保留标题/节点的上下级路径，并写入当前世界下选定的世界观。
+            支持 JSON、Markdown、XML、OPML。导入会保留标题/节点的上下级路径，并写入当前世界下选定的世界观。
           </Alert>
           <TextInput
             label="所属世界"
@@ -930,7 +935,7 @@ export const OutlineChapterWorkflow: React.FC = () => {
           <Select
             required
             label="目标世界观"
-            data={toOptions(worldviews, 'worldview_id', 'name')}
+            data={toWorldviewOptions(worldviews)}
             value={importWorldviewId || null}
             onChange={(value) => setImportWorldviewId(value || '')}
             searchable
@@ -939,7 +944,7 @@ export const OutlineChapterWorkflow: React.FC = () => {
             required
             label="导入文件"
             placeholder="选择 .json / .md / .opml"
-            accept=".json,.md,.markdown,.opml"
+            accept=".json,.md,.markdown,.xml,.opml"
             value={importFile}
             onChange={setImportFile}
           />

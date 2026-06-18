@@ -83,23 +83,35 @@ def upload_and_verify(world_id, worldview_id, file_path, expected_name, expected
 def main():
     server = start_real_api_if_requested()
     test_worldview_id = None
+    test_world_id = None
     try:
-        worlds = request_json("GET", "/api/worlds/list")
-        assert worlds, "worlds list must not be empty"
-        world_id = worlds[0]["world_id"]
-
         marker = uuid.uuid4().hex[:8]
-        created = request_json(
+        created_world = request_json(
             "POST",
-            "/api/worldviews/create",
+            "/api/worlds/create",
             json={
-                "world_id": world_id,
-                "worldview_id": f"wv_import_test_{marker}",
-                "name": f"导入测试世界观 {marker}",
+                "world_id": f"world_import_test_{marker}",
+                "name": f"导入测试世界 {marker}",
+                "summary": "world create should auto-provision unique worldview library",
+            },
+        )
+        test_world_id = created_world["world_id"]
+        worldviews = request_json(
+            "GET",
+            "/api/worldviews/list",
+            params={"world_id": test_world_id, "page": 1, "page_size": 10},
+        )
+        assert len(worldviews) == 1, worldviews
+        test_worldview_id = worldviews[0]["worldview_id"]
+        request_json(
+            "POST",
+            "/api/worldviews/update",
+            json={
+                "worldview_id": test_worldview_id,
+                "name": f"导入测试世界观库 {marker}",
                 "summary": "用于真实 requests 导入测试",
             },
         )
-        test_worldview_id = created["worldview_id"]
 
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)
@@ -115,23 +127,35 @@ def main():
                 '<?xml version="1.0" encoding="UTF-8"?><opml version="2.0"><body><outline text="魔法"><outline text="符文" _note="符文体系"/></outline></body></opml>',
                 encoding="utf-8",
             )
+            opml_structured_file = base / "hierarchy_structured.opml"
+            opml_structured_file.write_text(
+                '<?xml version="1.0" encoding="UTF-8"?><opml version="1.0"><body><outline text="种族"><outline text="碳基生命"><outline text="秦族"><outline text="最高标志"/><outline text="拥有独立文明"/></outline></outline></outline></body></opml>',
+                encoding="utf-8",
+            )
+            xml_file = base / "hierarchy.xml"
+            xml_file.write_text(
+                '<root><technology><propulsion><warp_drive>曲率航行依赖稳定场</warp_drive></propulsion></technology></root>',
+                encoding="utf-8",
+            )
 
-            upload_and_verify(world_id, test_worldview_id, json_file, "议会", "文明体系 > 政治 > 议会")
-            upload_and_verify(world_id, test_worldview_id, md_file, "北境", "地理 > 北境")
-            upload_and_verify(world_id, test_worldview_id, opml_file, "符文", "魔法 > 符文")
+            upload_and_verify(test_world_id, test_worldview_id, json_file, "议会", "文明体系 > 政治 > 议会")
+            upload_and_verify(test_world_id, test_worldview_id, md_file, "北境", "地理 > 北境")
+            upload_and_verify(test_world_id, test_worldview_id, opml_file, "符文", "魔法 > 符文")
+            upload_and_verify(test_world_id, test_worldview_id, opml_structured_file, "秦族", "种族 > 碳基生命 > 秦族")
+            upload_and_verify(test_world_id, test_worldview_id, xml_file, "warp_drive", "root > technology > propulsion > warp_drive")
 
         print({
             "status": "passed",
             "api_base_url": API_BASE_URL,
-            "world_id": world_id,
+            "world_id": test_world_id,
             "worldview_id": test_worldview_id,
-            "formats": ["json", "md", "opml"],
+            "formats": ["json", "md", "xml", "opml"],
         })
     finally:
-        if test_worldview_id:
+        if test_world_id:
             response = requests.delete(
-                f"{API_BASE_URL}/api/worldviews/delete",
-                json={"worldview_id": test_worldview_id, "cascade": True},
+                f"{API_BASE_URL}/api/worlds/delete",
+                json={"world_id": test_world_id, "cascade": True},
                 timeout=20,
             )
             assert response.ok, f"cleanup failed: {response.status_code} {response.text}"

@@ -99,6 +99,13 @@ def get_worldview(worldview_id: str) -> dict[str, Any] | None:
     return find_one(list_worldviews(worldview_id=worldview_id, page=1, page_size=20), "worldview_id", worldview_id)
 
 
+def get_worldview_for_world(world_id: str) -> dict[str, Any]:
+    """查询某个世界唯一的 worldview 库。"""
+    items = list_worldviews(world_id=world_id, page=1, page_size=20)
+    assert len(items) == 1, {"world_id": world_id, "worldviews": items}
+    return items[0]
+
+
 def get_novel(novel_id: str) -> dict[str, Any] | None:
     """查询单个小说。"""
     return find_one(list_novels(novel_id=novel_id, page=1, page_size=20), "novel_id", novel_id)
@@ -129,16 +136,26 @@ def create_world(*, world_id: str, name: str, summary: str, forbidden_rules: lis
     created = get_world(created_id)
     assert created is not None, {"created_id": created_id, "response": data}
     assert created["name"] == name, created
+    worldview = get_worldview_for_world(created_id)
+    created["worldview_id"] = worldview["worldview_id"]
     return created
 
 
 def create_worldview(*, world_id: str, worldview_id: str, name: str, summary: str) -> dict[str, Any]:
-    """通过真实 API 创建世界观，并查询确认真实入库。"""
-    data = assert_success(request_json("POST", "/api/worldviews/create", json={"world_id": world_id, "worldview_id": worldview_id, "name": name, "summary": summary}))
-    created_id = data.get("worldview_id", worldview_id)
+    """配置世界创建时自动生成的唯一 worldview 库，并查询确认真实入库。"""
+    existing = get_worldview_for_world(world_id)
+    data = assert_success(
+        request_json(
+            "POST",
+            "/api/worldviews/update",
+            json={"worldview_id": existing["worldview_id"], "name": name, "summary": summary},
+        )
+    )
+    created_id = data.get("worldview_id", existing["worldview_id"])
     created = get_worldview(created_id)
     assert created is not None, {"created_id": created_id, "response": data}
     assert created["world_id"] == world_id, created
+    assert created["name"] == name, created
     return created
 
 

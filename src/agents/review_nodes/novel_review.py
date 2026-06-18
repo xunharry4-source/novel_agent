@@ -6,7 +6,7 @@
 
 from typing import Any, Callable, Dict
 
-from src.agents.review_agent import execute_llm_review
+from src.agents.review_agent import execute_llm_review_detail
 from src.common.lore_utils import get_mongodb_db
 
 
@@ -32,9 +32,11 @@ def make_novel_review_node(
         """小说审查节点：读取小说规则，调用专属 LLM 审核当前 payload。"""
         db = get_mongodb_db()
         payload = dict(state.get("pending_payload") or {})
-        passed, errors = execute_llm_review(db, entity_type, payload)
+        review_detail = execute_llm_review_detail(db, entity_type, payload)
+        passed = bool(review_detail.get("passed"))
+        errors = list(review_detail.get("errors") or [])
         nodes = list(state.get("nodes") or [])
-        nodes.append(node_factory(node_id, "completed" if passed else "failed", {"payload": payload}, {"passed": passed, "errors": errors, "reviewer": reviewer}))
+        nodes.append(node_factory(node_id, "completed" if passed else "failed", {"payload": payload}, {"passed": passed, "errors": errors, "reviewer": reviewer, "llm_invoked": review_detail.get("llm_invoked"), "llm_call": review_detail.get("llm_call"), "raw_response": review_detail.get("raw_response", "")}))
         waiting_human = int(state.get("iterations") or 0) >= max_auto_review_iterations
         return {
             passed_key: passed,

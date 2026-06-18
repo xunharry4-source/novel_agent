@@ -6,6 +6,7 @@ Input -> Initial Expansion -> Human -> Commit；人工不同意则进入 Modify 
 
 import json
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -14,6 +15,10 @@ from langgraph.types import interrupt
 
 from src.common.config_utils import get_config
 from src.common.lore_utils import get_langfuse_callback, get_llm, get_mongodb_db, get_unified_context, parse_json_safely
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 AGENT_NAME = "world_agent"
@@ -110,7 +115,7 @@ def _extract_llm_content(response: Any) -> str:
     return str(content or "")
 
 
-def _llm_metadata(raw_content: str) -> Dict[str, Any]:
+def _llm_metadata(raw_content: str, prompt: str) -> Dict[str, Any]:
     """生成本次 world_agent LLM 调用的中文可审计元数据。"""
     config = get_config()
     provider = str(config.get("LLM_PROVIDER", "ollama")).lower()
@@ -126,6 +131,8 @@ def _llm_metadata(raw_content: str) -> Dict[str, Any]:
         "model": model_name or config.get("DEFAULT_MODEL"),
         "json_mode": True,
         "raw_response_chars": len(raw_content),
+        "prompt": prompt,
+        "prompt_chars": len(prompt),
     }
 
 
@@ -140,7 +147,7 @@ def _invoke_llm(prompt: str) -> tuple[str, Dict[str, Any]]:
     raw_content = _extract_llm_content(response)
     if not raw_content.strip():
         raise ValueError(f"{AGENT_NAME} returned empty LLM response")
-    return raw_content, _llm_metadata(raw_content)
+    return raw_content, _llm_metadata(raw_content, prompt)
 
 
 def _node(node_id: str, status: str, node_input: Dict[str, Any], output: Dict[str, Any]) -> Dict[str, Any]:
@@ -167,25 +174,30 @@ def build_initial_expansion_prompt(
     revision_mode: Optional[str],
     feedback: str,
 ) -> str:
-    """构造 world_agent 初始扩充 Prompt，专门整理世界根输入。"""
+    """构造 world_agent 初始扩充 Prompt，使用结构化模板明确世界根任务。"""
     world_id = payload.get("world_id") or payload.get("target_id") or ""
     world_id_hint = world_id or "写库时自动生成"
-    return f"""你是 world_agent 的初始扩充节点，只负责“世界 (World)”根实体的输入整理。
-禁止使用通用 Agent 口径。禁止生成世界观、小说、大纲或章节。禁止写库。禁止返回解释文字。
+    return f"""【角色设定】
+你是一名世界根设定编辑。你的唯一职责是整理和扩充“世界（World）”根实体，不得越权生成世界观、小说、大纲或章节内容。
 
+【操作流程 (Mandatory Workflow)】
+1. 审查（Review）：检查原始世界草稿是否缺少关键根设定，确认名称、摘要方向、业务 ID 与已有禁止规则/基本设定输入是否自洽。
+2. 扩展（Expand）：在不改变用户原始创意方向的前提下，扩充世界摘要，并补全 forbidden_rules 与 basic_settings，明确后续所有世界观与小说都必须遵守的根约束。
+
+【输入信息】
 【业务动作】{action}
 【世界 ID】{world_id_hint}
 【用户消息】{message}
 【人工反馈】{feedback}
 【修改模式】{revision_mode or "initial_expansion"}
-【原始 payload】
+【世界草稿】
 {json.dumps(payload or {}, ensure_ascii=False, indent=2)}
 
-任务：
-1. 保留用户原始世界创意、名称、摘要方向和业务 ID。
-2. 扩充世界根摘要，补全创作基调、底层规则、资源机制、组织结构、核心冲突、地理边界和风险约束。
-3. 必须生成 forbidden_rules（世界禁止规则）和 basic_settings（世界基本设定），供小说与世界观审查节点强制校验。
-4. 输出必须是可直接提交人工确认的世界 payload，但不得写库。
+【输出要求】
+1. 只返回合法 JSON，不得返回解释文字，不得写库。
+2. 必须保留用户原始世界创意、名称、摘要方向和业务 ID。
+3. 必须生成 `forbidden_rules` 与 `basic_settings`，供后续世界观与小说审查强制校验。
+4. `summary` 必须聚焦世界根设定，避免漂移到世界观条目、小说项目、大纲或章节正文。
 
 只返回合法 JSON：
 {{
@@ -268,15 +280,21 @@ def build_modification_prompt(
     revision_mode: Optional[str],
     feedback: str,
 ) -> str:
-    """构造 world_agent 修改内容 Prompt，只允许按人工反馈修改世界根实体。"""
+    """构造 world_agent 修改内容 Prompt，使用结构化模板明确局部修正任务。"""
     world_id = payload.get("world_id") or payload.get("target_id") or "world_default"
     rag_context = get_unified_context(
         f"{message}\n{payload.get('name', '')}\n{payload.get('summary', '')}",
         worldview_id=str(world_id),
     )
-    return f"""你是 world_agent 的修改内容节点，只负责按人工反馈修改“世界 (World)”根实体。
-本 Agent 只有世界职责，禁止生成世界观、小说、大纲或章节。禁止写库。禁止返回解释文字。
+    return f"""【角色设定】
+你是一名世界根设定编辑。你的唯一职责是修正“世界（World）”根实体，不得越权生成世界观、小说、大纲或章节内容。
 
+【操作流程 (Mandatory Workflow)】
+1. 审查（Review）：检查当前世界内容与人工反馈是否存在明确冲突，确认哪些字段必须调整、哪些字段必须保留。
+2. 修正（Modify）：根据【人工不同意原因/修改意见】和【修改模式】对世界内容做局部、精准修改，不得超范围改写。
+3. 扩展（Expand）：仅在完成修正后，补充必要细节，让世界根摘要、forbidden_rules 与 basic_settings 更完整，但不得偏离反馈要求。
+
+【输入信息】
 【业务动作】{action}
 【世界 ID】{world_id}
 【用户消息】{message}
@@ -287,11 +305,11 @@ def build_modification_prompt(
 【检索上下文】
 {rag_context}
 
-修改规则：
-1. 只修改用户反馈要求修改的内容；partial_rewrite/content_rewrite 必须保留未点名字段。
-2. full_rewrite 也必须保留 world_id、target_id 等业务 ID。
-3. 摘要仍保持 50-200 字，并只描述世界根设定，不生成世界观、小说、大纲或章节。
-4. forbidden_rules 与 basic_settings 是后续审查依据，必须保留或按人工反馈精确修改。
+【输出要求】
+1. 只返回合法 JSON，不得返回解释文字，不得写库。
+2. `partial_rewrite` / `content_rewrite` 必须保留未点名字段；`full_rewrite` 也必须保留 world_id、target_id 等业务 ID。
+3. `summary` 只描述世界根设定，不生成世界观、小说、大纲或章节。
+4. `forbidden_rules` 与 `basic_settings` 是后续审查依据，必须保留或按反馈精确修改。
 
 只返回合法 JSON：
 {{
@@ -449,7 +467,7 @@ def route_after_human(state: WorldAgentState) -> str:
 
 
 def commit_node(state: WorldAgentState) -> WorldAgentState:
-    """写库节点：人工批准后真实创建或更新 MongoDB worlds 集合。"""
+    """写库节点：人工批准后真实创建或更新 MongoDB worlds 集合，并自动维护唯一 worldview 库。"""
     db = get_mongodb_db()
     action = state.get("action", "create")
     payload = dict(state.get("pending_payload") or {})
@@ -467,7 +485,19 @@ def commit_node(state: WorldAgentState) -> WorldAgentState:
             "basic_settings": payload.get("basic_settings", {}),
         }
         db["worlds"].insert_one(doc)
-        result = doc
+        worldview_doc = {
+            "worldview_id": f"wv_{world_id}",
+            "world_id": world_id,
+            "name": f"{payload['name']} 世界观设定集",
+            "summary": payload.get("summary", ""),
+            "forbidden_rules": [],
+            "basic_settings": {},
+            "auto_created": True,
+            "created_at": _now(),
+            "updated_at": _now(),
+        }
+        db["worldviews"].insert_one(worldview_doc)
+        result = {**doc, "worldview_id": worldview_doc["worldview_id"]}
     elif action == "update":
         target_id = payload["target_id"]
         update = {k: payload[k] for k in ("name", "summary", "forbidden_rules", "basic_settings") if k in payload}

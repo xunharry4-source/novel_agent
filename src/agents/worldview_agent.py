@@ -6,6 +6,7 @@
 
 import json
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -18,11 +19,17 @@ from src.common.config_utils import get_config
 from src.common.lore_utils import get_langfuse_callback, get_llm, get_mongodb_db, get_unified_context, parse_json_safely
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 AGENT_NAME = "worldview_agent"
+INITIAL_EXPANSION_AGENT_NAME = "worldview_agent_initial_expansion"
+MODIFY_CONTENT_AGENT_NAME = "worldview_agent_modify_content"
 ENTITY_TYPE = "worldview"
 PRIMARY_FIELD = "summary"
 MAX_AUTO_REVIEW_ITERATIONS = 3
-WORKFLOW_DESCRIPTION = "世界观 Agent 流程：接收设定输入 -> 初始扩充设定内容 -> 世界规则审查 -> 既有世界观一致性审查 -> 人工确认 -> 批准后写入 worldviews；人工不同意或任一审查失败进入修改内容节点，再从世界规则审查重新开始。"
+WORKFLOW_DESCRIPTION = "世界观 Agent 流程：接收设定输入 -> 初始扩充设定内容 -> 世界规则审查 -> 既有世界观一致性审查 -> 人工确认 -> 批准后写入该世界唯一 worldview 库下的 lore(type=worldview) 设定条目；人工不同意或任一审查失败进入修改内容节点，再从世界规则审查重新开始。"
 WORKFLOW_STEPS = {
     "input": {
         "step_index": 1,
@@ -63,8 +70,8 @@ WORKFLOW_STEPS = {
     "commit": {
         "step_index": 7,
         "step_title": "步骤 7：写库固化",
-        "function": "执行 worldviews 集合写入",
-        "description": "人工批准后写入或更新 MongoDB worldviews 集合，并保留 world_id、worldview_id 和真实写库结果。",
+        "function": "执行 worldview 设定条目写入",
+        "description": "人工批准后写入或更新该世界唯一 worldview 库下的 MongoDB lore(type=worldview) 设定条目，并保留 world_id、worldview_id 和真实写库结果。",
     },
 }
 NODE_ANNOTATIONS = {
@@ -99,8 +106,8 @@ NODE_ANNOTATIONS = {
         "next_step_annotation": "下一步回到世界规则审查，必须连续通过两个审查节点后才能进入人工确认。",
     },
     "commit": {
-        "input_annotation": "输入是人工批准后的最终 worldview payload。",
-        "output_annotation": "输出是真实 MongoDB worldviews 写入结果，包含 world_id 与 worldview_id。",
+        "input_annotation": "输入是人工批准后的最终 worldview 设定 payload，必须挂到该世界唯一 worldview 库下。",
+        "output_annotation": "输出是真实 MongoDB lore(type=worldview) 写入结果，包含设定条目 id、world_id 与 worldview_id。",
         "next_step_annotation": "写库完成后工作流结束。",
     },
 }
@@ -144,21 +151,23 @@ def _extract_llm_content(response: Any) -> str:
     return str(content or "")
 
 
-def _llm_metadata(raw_content: str) -> Dict[str, Any]:
+def _llm_metadata(raw_content: str, prompt: str, llm_agent_name: str) -> Dict[str, Any]:
     """生成本次 worldview_agent LLM 调用的中文可审计元数据。"""
     config = get_config()
     provider = str(config.get("LLM_PROVIDER", "ollama")).lower()
-    agent_config = (config.get("AGENT_MODELS") or {}).get(AGENT_NAME) or {}
+    agent_config = (config.get("AGENT_MODELS") or {}).get(llm_agent_name) or {}
+    if not agent_config:
+        agent_config = (config.get("AGENT_MODELS") or {}).get(AGENT_NAME) or {}
     model_name = agent_config.get("model") if isinstance(agent_config, dict) else agent_config
     provider_config = (config.get("LLM_MODELS") or {}).get(provider) or {}
     if isinstance(provider_config, dict) and not model_name:
         model_name = provider_config.get("default")
-    return {"llm_invoked": True, "llm_agent_name": AGENT_NAME, "provider": provider, "model": model_name or config.get("DEFAULT_MODEL"), "json_mode": True, "raw_response_chars": len(raw_content)}
+    return {"llm_invoked": True, "llm_agent_name": llm_agent_name, "provider": provider, "model": model_name or config.get("DEFAULT_MODEL"), "json_mode": True, "raw_response_chars": len(raw_content), "prompt": prompt, "prompt_chars": len(prompt)}
 
 
-def _invoke_llm(prompt: str) -> tuple[str, Dict[str, Any]]:
+def _invoke_llm(prompt: str, *, llm_agent_name: str) -> tuple[str, Dict[str, Any]]:
     """真实调用 worldview_agent 对应 LLM；空响应直接报错，禁止伪成功。"""
-    llm = get_llm(json_mode=True, agent_name=AGENT_NAME)
+    llm = get_llm(json_mode=True, agent_name=llm_agent_name)
     config: Dict[str, Any] = {}
     callback = get_langfuse_callback()
     if callback:
@@ -166,8 +175,8 @@ def _invoke_llm(prompt: str) -> tuple[str, Dict[str, Any]]:
     response = llm.invoke(prompt, config=config if config else None)
     raw_content = _extract_llm_content(response)
     if not raw_content.strip():
-        raise ValueError(f"{AGENT_NAME} returned empty LLM response")
-    return raw_content, _llm_metadata(raw_content)
+        raise ValueError(f"{llm_agent_name} returned empty LLM response")
+    return raw_content, _llm_metadata(raw_content, prompt, llm_agent_name)
 
 
 def _node(node_id: str, status: str, node_input: Dict[str, Any], output: Dict[str, Any]) -> Dict[str, Any]:
@@ -178,107 +187,239 @@ def _node(node_id: str, status: str, node_input: Dict[str, Any], output: Dict[st
 
 
 def build_initial_expansion_prompt(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str], feedback: str) -> str:
-    """构造 worldview_agent 初始扩充 Prompt，专门整理世界观设定输入。"""
-    return f"""你是 worldview_agent 的初始扩充节点，只负责世界观 Canon 设定输入整理。
-禁止使用通用 Agent 口径。禁止生成小说项目、大纲或章节正文。禁止写库。禁止返回解释文字。
+    """构造 worldview_agent 初始扩充 Prompt，使用结构化模板明确世界观任务。"""
+    world_id = str(payload.get("world_id", "") or "")
+    world_rules = _load_world_forbidden_rules(world_id)
+    return f"""【角色设定】
+你是一名世界观编辑和设定守门人。你的唯一职责是整理和扩充世界观条目，确保所有内容严格遵循父级世界的禁止规则。
 
+【操作流程 (Mandatory Workflow)】
+1. 审查（Review）：检查世界观草稿与世界禁止规则是否冲突，确认 name、summary、world_id 和业务 ID 是否完整、自洽。
+2. 扩展（Expand）：在不偏离用户原始设定的前提下，扩充 summary，补全分类、核心规则、佳能关键词和冲突风险。
+
+【输入信息】
+【所属世界 world_id】{world_id}
 【业务动作】{action}
-【所属世界 world_id】{payload.get("world_id", "")}
-【世界观 ID】{payload.get("worldview_id", "") or payload.get("target_id", "")}
 【用户消息】{message}
-【人工反馈】{feedback}
-【修改模式】{revision_mode or "initial_expansion"}
-【原始 payload】
+【世界观草稿】
 {json.dumps(payload or {}, ensure_ascii=False, indent=2)}
+【世界禁止规则】
+{json.dumps(world_rules, ensure_ascii=False, indent=2)}
 
-任务：
-1. 保留用户原始设定、父级 world_id、worldview_id 或 target_id。
-2. 补全条目名称、分类、核心规则、Canon 检索关键词和冲突风险。
-3. 明确后续要先接受世界禁止规则与基本设定审查，再接受既有世界观一致性审查。
-4. 输出必须是可直接提交审查的世界观 payload，但不得写库。
+【输出要求】
+1. 只返回合法 JSON，不得返回解释文字，不得写库。
+2. 必须保留用户原始设定、父级 world_id、worldview_id、target_id。
+3. 必须扩充世界观 `summary`，并补全分类、核心规则、佳能关键词和冲突风险。
+4. 所有扩展都不得违反世界禁止规则。
 
 只返回合法 JSON：
 {{
   "metadata": {{"agent": "worldview_agent", "node": "initial_expansion", "entity_type": "worldview", "action": "{action}"}},
   "payload": {{
-    "world_id": "{payload.get("world_id", "")}",
+    "world_id": "{world_id}",
     "worldview_id": "{payload.get("worldview_id", "")}",
     "target_id": "{payload.get("target_id", "")}",
     "name": "世界观名称",
-    "summary": "结构化世界观设定条目"
+    "summary": "构造世界观设定边界"
   }},
   "expanded_input": {{
-    "world_id": "{payload.get("world_id", "")}",
+    "world_id": "{world_id}",
     "worldview_id": "{payload.get("worldview_id", "")}",
     "target_id": "{payload.get("target_id", "")}",
     "name": "{payload.get("name", "")}",
     "summary_seed": "{payload.get("summary", "")}",
-    "category": "从用户输入提炼的设定分类",
-    "canon_keywords": ["需要检索的 Canon 关键词"],
+    "category": "从用户输入提炼的设置分类",
+    "canon_keywords": ["需要搜索的正典关键词"],
     "must_keep": ["不可改写的用户原意"],
-    "review_focus": "审查节点需要重点检查的 Canon 约束"
+    "review_focus": "审查节点需要重点检查的佳能约束"
   }},
-  "expansion_notes": "初始扩充节点整理了哪些设定约束"
+  "expansion_notes": "自然资源新增整理了哪些设定约束"
 }}
 """
+
+
+def _load_world_forbidden_rules(world_id: str) -> List[str]:
+    """读取父级世界的禁止规则；缺失时回退到世界观修改节点默认硬约束。"""
+    default_rules = [
+        "不得出现魔法",
+        "不得出现神",
+        "不得超越科学，出现法则，创造物质，创建世界等",
+    ]
+    if not world_id:
+        return default_rules
+    world = get_mongodb_db()["worlds"].find_one({"world_id": world_id}) or {}
+    forbidden_rules = world.get("forbidden_rules")
+    if isinstance(forbidden_rules, list) and forbidden_rules:
+        return [str(rule) for rule in forbidden_rules if str(rule).strip()]
+    return default_rules
+
+
+def _ensure_worldview_library(db: Any, world_id: str) -> Dict[str, Any]:
+    """确保父级世界存在唯一 worldview 库；缺失时按世界自动补建。"""
+    worldview = db["worldviews"].find_one({"world_id": world_id})
+    if worldview:
+        return worldview
+    world = db["worlds"].find_one({"world_id": world_id})
+    if not world:
+        raise ValueError(f"Parent world not found for worldview setting: {world_id}")
+    worldview = {
+        "worldview_id": f"wv_{world_id}",
+        "world_id": world_id,
+        "name": f"{world.get('name', world_id)} 世界观设定集",
+        "summary": world.get("summary", ""),
+        "forbidden_rules": [],
+        "basic_settings": {},
+        "auto_created": True,
+        "created_at": _now(),
+        "updated_at": _now(),
+    }
+    db["worldviews"].insert_one(worldview)
+    return worldview
+
+
+def _normalize_hierarchy_path(raw_path: Any) -> List[str]:
+    """统一世界观层级路径写法，始终使用 `A > B > C` 语义。"""
+    if raw_path in (None, ""):
+        return []
+    return [part.strip() for part in str(raw_path).replace("/", ">").split(">") if part.strip()]
+
+
+def _resolve_worldview_entry_path(
+    payload: Dict[str, Any],
+    *,
+    entry_name: str,
+    fallback_path: Any = "",
+    existing_name: str = "",
+) -> str:
+    """根据 parent_path/path/category 解析世界观设定条目的最终层级路径。"""
+    explicit_path = _normalize_hierarchy_path(payload.get("path"))
+    explicit_parent = _normalize_hierarchy_path(payload.get("parent_path"))
+    category_parts = _normalize_hierarchy_path(payload.get("category"))
+    fallback_parts = _normalize_hierarchy_path(fallback_path)
+
+    if explicit_parent:
+        full_parts = explicit_parent + [entry_name]
+    elif explicit_path:
+        if explicit_path[-1] == entry_name:
+            full_parts = explicit_path
+        elif existing_name and explicit_path[-1] == existing_name:
+            full_parts = explicit_path[:-1] + [entry_name]
+        else:
+            full_parts = explicit_path + [entry_name]
+    elif category_parts:
+        full_parts = category_parts if category_parts[-1] == entry_name else category_parts + [entry_name]
+    elif fallback_parts:
+        if fallback_parts[-1] == entry_name:
+            full_parts = fallback_parts
+        elif existing_name and fallback_parts[-1] == existing_name:
+            full_parts = fallback_parts[:-1] + [entry_name]
+        else:
+            full_parts = fallback_parts + [entry_name]
+    else:
+        full_parts = [entry_name]
+
+    return " > ".join(full_parts)
+
+
+def _preserve_routing_fields(source_payload: Dict[str, Any], target_payload: Dict[str, Any]) -> None:
+    """保留层级挂载必需字段，禁止 LLM 草案把世界观目录上下文改丢。"""
+    for key in ("world_id", "worldview_id", "target_id", "parent_path", "path"):
+        if source_payload.get(key):
+            target_payload[key] = source_payload[key]
 
 
 def generate_initial_expansion(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str] = None, feedback: str = "") -> Dict[str, Any]:
     """调用 LLM 生成世界观初始扩充结果，确保第二节点真实使用 worldview_agent LLM。"""
     prompt = build_initial_expansion_prompt(action, payload or {}, message, revision_mode=revision_mode, feedback=feedback)
-    raw_content, llm_call = _invoke_llm(prompt)
+    raw_content, llm_call = _invoke_llm(prompt, llm_agent_name=INITIAL_EXPANSION_AGENT_NAME)
     parsed = parse_json_safely(raw_content)
     if not isinstance(parsed, dict):
         raise ValueError(f"{AGENT_NAME} initial expansion returned non-object JSON: {raw_content[:500]}")
     expanded_input = parsed.get("expanded_input") or {}
-    initial_payload = parsed.get("payload") or expanded_input
+    initial_payload = parsed.get("payload")
+    if not isinstance(initial_payload, dict):
+        initial_payload = parsed.get("有效载荷")
+    if not isinstance(initial_payload, dict):
+        initial_payload = expanded_input
     if not isinstance(initial_payload, dict):
         raise ValueError(f"{AGENT_NAME} initial expansion missing payload object: {raw_content[:500]}")
     if not isinstance(expanded_input, dict):
         expanded_input = {}
+    _preserve_routing_fields(payload, initial_payload)
+    _preserve_routing_fields(payload, expanded_input)
     if payload.get("name") and revision_mode != "full_rewrite":
         initial_payload["name"] = payload["name"]
-    return {"payload": initial_payload, "expanded_input": expanded_input, "llm_invoked": True, "agent_name": AGENT_NAME, "llm_agent_name": AGENT_NAME, "llm_call": llm_call, "raw_response": raw_content, "parsed_response": parsed, "expansion_notes": parsed.get("expansion_notes", "")}
+    return {"payload": initial_payload, "expanded_input": expanded_input, "llm_invoked": True, "agent_name": INITIAL_EXPANSION_AGENT_NAME, "llm_agent_name": INITIAL_EXPANSION_AGENT_NAME, "llm_call": llm_call, "raw_response": raw_content, "parsed_response": parsed, "expansion_notes": parsed.get("expansion_notes", "")}
 
 
 def build_modification_prompt(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str], feedback: str, expansion_error: str = "") -> str:
-    """构造 worldview_agent 修改内容 Prompt，只允许按反馈修正世界观 Canon 设定。"""
+    """构造 worldview_agent 修改内容 Prompt，使用结构化模板明确局部修正任务。"""
     rag_context = get_unified_context(
         f"{message}\n{payload.get('name', '')}\n{payload.get('summary', '')}",
         worldview_id=str(payload.get("worldview_id") or payload.get("target_id") or "default_wv"),
     )
-    retry_clause = f"\n【审查失败原因】{expansion_error}\n必须根据失败原因修正后重新扩充。" if expansion_error else ""
-    return f"""你是 worldview_agent 的修改内容节点，只负责按反馈修正世界观规则与设定库。
-禁止生成小说项目、大纲或章节正文。禁止写库。禁止返回解释文字。
+    world_id = str(payload.get("world_id", "") or "")
+    world_rules = _load_world_forbidden_rules(world_id)
+    review_feedback = feedback or expansion_error or "无额外修改意见。"
+    retry_clause = f"\n【附加审查失败原因】\n{expansion_error}\n" if expansion_error else ""
+    return f"""【角色设定】
+你是一名世界观编辑和设定守门人。你的唯一职责是修正世界观条目，确保所有内容严格遵循父级世界的禁止规则与已有设定。
 
+【操作流程 (Mandatory Workflow)】
+1. 审查（Review）：检查当前世界观与世界禁止规则、审查意见、人工反馈之间的冲突点。
+2. 修正（Modify）：根据【修改意见】和【修改模式】对世界观做局部、精准修改，不得超范围改写。
+3. 扩展（Expand）：仅在修正完成后，补充必要细节、分类、核心规则和佳能关键词，但不得偏离反馈要求。
+
+【输入信息】
+【所属世界 world_id】{world_id}
 【业务动作】{action}
-【所属世界 world_id】{payload.get("world_id", "")}
-【世界观 ID】{payload.get("worldview_id", "") or payload.get("target_id", "")}
-【用户消息】{message}
-【人工反馈或审查意见】{feedback}
 【修改模式】{revision_mode or "partial_rewrite"}
-【当前 payload】
+【用户消息】{message}
+【世界观草稿】
 {json.dumps(payload or {}, ensure_ascii=False, indent=2)}
-【RAG 上下文】
-{rag_context}{retry_clause}
+【修改意见】
+{json.dumps({
+    "修改范围": "只允许局部修改，只修改用户指定范围的内容，不要重写或者超出意见修改范围的内容",
+    "修改意见": review_feedback,
+}, ensure_ascii=False, indent=2)}
+【世界禁止规则】
+{json.dumps(world_rules, ensure_ascii=False, indent=2)}{retry_clause}
+【参考上下文】
+{rag_context}
 
-修改规则：
-1. 只修正审查失败原因或人工反馈要求修改的内容。
-2. 必须包含条目名称、核心描述、规则约束、分类标签。
-3. 必须保留 world_id、worldview_id、target_id，且不得破坏未点名内容。
+【输出要求】
+1. 只返回合法 JSON，不得返回解释文字，不得写库。
+2. 必须保留 `world_id`、`worldview_id`、`target_id`、`name`，且只在修改意见允许的范围内修改内容。
+3. `summary` 必须消除超自然、超科学、违反世界禁止规则的内容。
+4. 补充细节时不得引入新的设定漂移或逻辑冲突。
 
-只返回合法 JSON：
+最终输出必须严格遵守以下结构：
 {{
-  "metadata": {{"agent": "worldview_agent", "node": "modify_content", "entity_type": "worldview", "action": "{action}"}},
+  "metadata": {{
+    "agent": "worldview_agent",
+    "node": "modify_content",
+    "entity_type": "worldview",
+    "action": "{action}"
+  }},
   "payload": {{
-    "world_id": "{payload.get("world_id", "")}",
+    "world_id": "{world_id}",
     "worldview_id": "{payload.get("worldview_id", "")}",
     "target_id": "{payload.get("target_id", "")}",
     "name": "世界观名称",
-    "summary": "结构化世界观设定条目"
+    "summary": "修改后的世界观摘要"
   }},
-  "modification_notes": "worldview_agent 本轮修正的设定维度",
-  "change_summary": "相对输入 payload 的变化摘要"
+  "expanded_input": {{
+    "world_id": "{world_id}",
+    "worldview_id": "{payload.get("worldview_id", "")}",
+    "target_id": "{payload.get("target_id", "")}",
+    "name": "世界观名称",
+    "summary_seed": "修改后的摘要种子",
+    "category": "提炼的分类",
+    "canon_keywords": ["搜索关键词"],
+    "must_keep": ["不可改写的用户原意/硬性规则"],
+    "review_focus": "审查节点需要重点检查的佳能约束"
+  }},
+  "expansion_notes": "根据操作流程执行后的总结和补充说明。"
 }}
 """
 
@@ -286,16 +427,36 @@ def build_modification_prompt(action: str, payload: Dict[str, Any], message: str
 def generate_content_modification(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str] = None, feedback: str = "", expansion_error: str = "") -> Dict[str, Any]:
     """调用 LLM 根据审查意见或人工反馈修改世界观内容。"""
     prompt = build_modification_prompt(action, payload or {}, message, revision_mode=revision_mode, feedback=feedback, expansion_error=expansion_error)
-    raw_content, llm_call = _invoke_llm(prompt)
+    raw_content, llm_call = _invoke_llm(prompt, llm_agent_name=MODIFY_CONTENT_AGENT_NAME)
     parsed = parse_json_safely(raw_content)
     if not isinstance(parsed, dict):
         raise ValueError(f"{AGENT_NAME} modification returned non-object JSON: {raw_content[:500]}")
     modified_payload = parsed.get("payload")
     if not isinstance(modified_payload, dict):
+        modified_payload = parsed.get("有效载荷")
+    if not isinstance(modified_payload, dict):
         raise ValueError(f"{AGENT_NAME} modification missing payload object: {raw_content[:500]}")
+    expanded_input = parsed.get("expanded_input")
+    if not isinstance(expanded_input, dict):
+        expanded_input = {}
+    expansion_notes = str(parsed.get("expansion_notes") or "")
+    _preserve_routing_fields(payload, modified_payload)
+    _preserve_routing_fields(payload, expanded_input)
     if payload.get("name") and revision_mode != "full_rewrite":
         modified_payload["name"] = payload["name"]
-    return {"payload": modified_payload, "llm_invoked": True, "agent_name": AGENT_NAME, "llm_agent_name": AGENT_NAME, "llm_call": llm_call, "raw_response": raw_content, "parsed_response": parsed, "modification_notes": parsed.get("modification_notes", ""), "change_summary": parsed.get("change_summary", "")}
+    return {
+        "payload": modified_payload,
+        "expanded_input": expanded_input,
+        "llm_invoked": True,
+        "agent_name": MODIFY_CONTENT_AGENT_NAME,
+        "llm_agent_name": MODIFY_CONTENT_AGENT_NAME,
+        "llm_call": llm_call,
+        "raw_response": raw_content,
+        "parsed_response": parsed,
+        "expansion_notes": expansion_notes,
+        "modification_notes": parsed.get("modification_notes", "") or expansion_notes,
+        "change_summary": parsed.get("change_summary", "") or expansion_notes,
+    }
 
 
 def input_node(state: WorldviewAgentState) -> WorldviewAgentState:
@@ -401,20 +562,69 @@ def route_after_human(state: WorldviewAgentState) -> str:
 
 
 def commit_node(state: WorldviewAgentState) -> WorldviewAgentState:
-    """写库节点：人工批准后真实创建或更新 MongoDB worldviews 集合。"""
+    """写库节点：人工批准后真实创建或更新该世界唯一 worldview 库下的 lore 设定条目。"""
     db = get_mongodb_db()
     action = state.get("action", "create")
     payload = dict(state.get("pending_payload") or {})
     if action == "create":
-        worldview_id = payload.get("worldview_id") or f"wv_{uuid.uuid4().hex[:8]}"
-        doc = {"worldview_id": worldview_id, "world_id": payload["world_id"], "name": payload["name"], "summary": payload.get("summary", "")}
-        db["worldviews"].insert_one(doc)
+        world_id = str(payload["world_id"])
+        worldview_library = _ensure_worldview_library(db, world_id)
+        entry_id = str(payload.get("id") or payload.get("entry_id") or f"wv_entry_{uuid.uuid4().hex[:8]}")
+        if db["lore"].find_one({"id": entry_id}):
+            raise ValueError(f"Worldview setting already exists: {entry_id}")
+        entry_name = str(payload["name"]).strip()
+        hierarchy_path = _resolve_worldview_entry_path(payload, entry_name=entry_name)
+        doc = {
+            "id": entry_id,
+            "type": "worldview",
+            "world_id": world_id,
+            "worldview_id": worldview_library["worldview_id"],
+            "name": entry_name,
+            "content": payload.get("summary", ""),
+            "category": hierarchy_path,
+            "path": hierarchy_path,
+            "created_at": _now(),
+            "updated_at": _now(),
+        }
+        db["lore"].insert_one(doc)
         result = doc
     elif action == "update":
         target_id = payload["target_id"]
-        update = {k: payload[k] for k in ("name", "summary") if k in payload}
-        db["worldviews"].update_one({"worldview_id": target_id}, {"$set": update})
-        result = {"worldview_id": target_id, **update}
+        worldview_entry = db["lore"].find_one({"id": target_id, "type": "worldview"})
+        if worldview_entry:
+            next_name = str(payload.get("name") or worldview_entry.get("name") or "").strip()
+            update = {
+                **({"name": next_name} if "name" in payload else {}),
+                **({"content": payload["summary"]} if "summary" in payload else {}),
+                "updated_at": _now(),
+            }
+            if any(key in payload for key in ("name", "category", "path", "parent_path")):
+                hierarchy_path = _resolve_worldview_entry_path(
+                    payload,
+                    entry_name=next_name or str(worldview_entry.get("name") or ""),
+                    fallback_path=worldview_entry.get("path") or worldview_entry.get("category") or "",
+                    existing_name=str(worldview_entry.get("name") or ""),
+                )
+                update["category"] = hierarchy_path
+                update["path"] = hierarchy_path
+            db["lore"].update_one({"id": target_id, "type": "worldview"}, {"$set": update})
+            result = {
+                "id": target_id,
+                "type": "worldview",
+                "world_id": worldview_entry["world_id"],
+                "worldview_id": worldview_entry["worldview_id"],
+                **update,
+            }
+        else:
+            library = db["worldviews"].find_one({"worldview_id": target_id})
+            if not library:
+                raise ValueError(f"Worldview setting not found: {target_id}")
+            update = {k: payload[k] for k in ("name", "summary") if k in payload}
+            if "summary" in update:
+                update["summary"] = update.pop("summary")
+            update["updated_at"] = _now()
+            db["worldviews"].update_one({"worldview_id": target_id}, {"$set": update})
+            result = {"worldview_id": target_id, **update}
     else:
         raise ValueError(f"{AGENT_NAME} does not handle delete operations")
     nodes = list(state.get("nodes") or [])
