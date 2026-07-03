@@ -35,6 +35,13 @@ def _get_context_for_review(entity_type: str, payload: Dict[str, Any]) -> str:
     return "未能获取到有效的背景上下文设定。"
 
 
+def _truncate_review_text(value: Any, *, limit: int = 1600) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "...[truncated]"
+
+
 def _get_world_policy_context(db, entity_type: str, payload: Dict[str, Any]) -> str:
     """读取世界根实体中的禁止规则与基本设定，供审查节点强制校验。"""
     world_id = payload.get("world_id")
@@ -122,6 +129,95 @@ def _get_novel_policy_context(db, entity_type: str, payload: Dict[str, Any]) -> 
         f"{json.dumps(forbidden_rules or [], ensure_ascii=False, indent=2)}\n\n"
         "【小说基本设定】\n"
         f"{json.dumps(basic_settings or {}, ensure_ascii=False, indent=2)}"
+    )
+
+
+def _get_worldview_policy_context(db, entity_type: str, payload: Dict[str, Any]) -> str:
+    """直接读取 worldview 根摘要和 lore 条目，禁止只依赖模糊检索。"""
+    if db is None:
+        return _get_context_for_review(entity_type, payload)
+
+    worldview_id = payload.get("worldview_id")
+    world_id = payload.get("world_id")
+    target_id = payload.get("target_id")
+    outline_id = payload.get("outline_id")
+    novel_id = payload.get("novel_id")
+    worldview_doc: Dict[str, Any] = {}
+
+    if not world_id and novel_id:
+        try:
+            novel_doc = db["novels"].find_one({"novel_id": novel_id}) or {}
+            world_id = novel_doc.get("world_id")
+        except Exception as e:
+            logger.warning(f"Failed to resolve world_id from novel for worldview review: {e}")
+    if not world_id and outline_id:
+        try:
+            outline_doc = db["outlines"].find_one({"outline_id": outline_id}) or db["outlines"].find_one({"id": outline_id}) or {}
+            world_id = outline_doc.get("world_id")
+            worldview_id = worldview_id or outline_doc.get("worldview_id")
+        except Exception as e:
+            logger.warning(f"Failed to resolve world_id from outline for worldview review: {e}")
+    if not world_id and entity_type.startswith("chapter") and target_id:
+        try:
+            prose_doc = (
+                db["prose"].find_one({"id": target_id})
+                or db["prose"].find_one({"scene_id": target_id})
+                or db["prose"].find_one({"prose_id": target_id})
+                or {}
+            )
+            world_id = prose_doc.get("world_id")
+            worldview_id = worldview_id or prose_doc.get("worldview_id")
+        except Exception as e:
+            logger.warning(f"Failed to resolve world_id from prose for worldview review: {e}")
+
+    try:
+        if worldview_id:
+            worldview_doc = db["worldviews"].find_one({"worldview_id": worldview_id}) or {}
+        if not worldview_doc and world_id:
+            worldview_doc = db["worldviews"].find_one({"world_id": world_id}) or {}
+            worldview_id = worldview_doc.get("worldview_id")
+    except Exception as e:
+        logger.warning(f"Failed to load worldview policy for review: {e}")
+
+    entries: List[Dict[str, Any]] = []
+    if worldview_id:
+        try:
+            cursor = db["lore"].find({"worldview_id": worldview_id, "type": "worldview"})
+            if hasattr(cursor, "sort"):
+                try:
+                    cursor = cursor.sort([("updated_at", -1), ("created_at", -1)])
+                except Exception:
+                    pass
+            if hasattr(cursor, "limit"):
+                try:
+                    cursor = cursor.limit(8)
+                except Exception:
+                    pass
+            for doc in cursor:
+                entries.append(
+                    {
+                        "id": doc.get("id"),
+                        "name": doc.get("name") or doc.get("title"),
+                        "path": doc.get("path") or doc.get("category"),
+                        "content": _truncate_review_text(doc.get("content"), limit=1200),
+                    }
+                )
+                if len(entries) >= 8:
+                    break
+        except Exception as e:
+            logger.warning(f"Failed to load worldview lore entries for review: {e}")
+
+    root_block = {
+        "worldview_id": worldview_doc.get("worldview_id") or worldview_id,
+        "world_id": worldview_doc.get("world_id") or world_id,
+        "name": worldview_doc.get("name"),
+        "summary": _truncate_review_text(worldview_doc.get("summary"), limit=1000),
+    }
+    return (
+        "【世界观总设】\n"
+        f"{json.dumps(root_block, ensure_ascii=False, indent=2)}\n\n"
+        "【世界观 Lore 条目】\n"
+        f"{json.dumps(entries or [], ensure_ascii=False, indent=2)}"
     )
 
 
@@ -265,6 +361,10 @@ REVIEW_SECTION_BUILDERS: Dict[str, Tuple[str, Callable[..., str]]] = {
         "以下是小说禁止规则与基本设定（大纲和章节必须遵守）：",
         _get_novel_policy_context,
     ),
+    "worldview_policy": (
+        "以下是世界观 Canon 设定（必须优先遵守）：",
+        _get_worldview_policy_context,
+    ),
     "outline_policy": (
         "以下是父级大纲约束（章节必须遵守）：",
         _get_outline_policy_context,
@@ -287,28 +387,28 @@ REVIEW_SECTION_BUILDERS: Dict[str, Tuple[str, Callable[..., str]]] = {
 ENTITY_REVIEW_SECTIONS: Dict[str, List[str]] = {
     "worldview_world_rules": ["world_policy"],
     "worldview_consistency": ["context_reference"],
-    "novel_world_rules": ["world_policy", "context_reference"],
+    "novel_world_rules": ["world_policy", "worldview_policy", "context_reference"],
     "outline_world_rules": ["world_policy"],
-    "outline_worldview_rules": ["context_reference"],
+    "outline_worldview_rules": ["worldview_policy", "context_reference"],
     "outline_novel_rules": ["novel_policy"],
     "chapter_world_rules": ["world_policy"],
-    "chapter_worldview_rules": ["context_reference"],
+    "chapter_worldview_rules": ["worldview_policy", "context_reference"],
     "chapter_novel_rules": ["novel_policy"],
     "chapter_outline_rules": ["outline_policy"],
     "chapter_chapter_outline_rules": ["chapter_outline"],
     "chapter_consistency": ["previous_chapter", "chapter_outline"],
     "chapter_plot_errors": ["outline_policy", "chapter_outline", "previous_chapter"],
-    "worldview": ["world_policy", "context_reference"],
-    "novel": ["world_policy", "context_reference"],
-    "outline": ["world_policy", "novel_policy", "context_reference"],
-    "chapter": ["world_policy", "novel_policy", "outline_policy", "chapter_outline", "previous_chapter", "context_reference"],
+    "worldview": ["world_policy", "worldview_policy", "context_reference"],
+    "novel": ["world_policy", "novel_policy", "worldview_policy", "context_reference"],
+    "outline": ["world_policy", "novel_policy", "worldview_policy", "context_reference"],
+    "chapter": ["world_policy", "novel_policy", "worldview_policy", "outline_policy", "chapter_outline", "previous_chapter", "context_reference"],
 }
 
 
 def _review_sections_for_entity_type(entity_type: str) -> List[str]:
     return ENTITY_REVIEW_SECTIONS.get(
         entity_type,
-        ["world_policy", "novel_policy", "outline_policy", "chapter_outline", "previous_chapter", "context_reference"],
+        ["world_policy", "novel_policy", "worldview_policy", "outline_policy", "chapter_outline", "previous_chapter", "context_reference"],
     )
 
 

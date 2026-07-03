@@ -69,7 +69,7 @@ def build_chapter_review_nodes(*, node_factory: NodeFactory, max_auto_review_ite
         "world_review_node": make_world_review_node(
             node_id="world_review",
             entity_type="chapter_world_rules",
-            reviewer="chapter_world_review_agent",
+            reviewer="chapter_world_rules_review_agent",
             passed_key="world_review_passed",
             errors_key="world_review_errors",
             feedback_key="world_review_feedback",
@@ -86,7 +86,7 @@ def build_chapter_review_nodes(*, node_factory: NodeFactory, max_auto_review_ite
         "worldview_review_node": make_worldview_review_node(
             node_id="worldview_review",
             entity_type="chapter_worldview_rules",
-            reviewer="chapter_worldview_review_agent",
+            reviewer="chapter_worldview_rules_review_agent",
             passed_key="worldview_review_passed",
             errors_key="worldview_review_errors",
             feedback_key="worldview_review_feedback",
@@ -103,7 +103,7 @@ def build_chapter_review_nodes(*, node_factory: NodeFactory, max_auto_review_ite
         "novel_review_node": make_novel_review_node(
             node_id="novel_review",
             entity_type="chapter_novel_rules",
-            reviewer="chapter_novel_review_agent",
+            reviewer="chapter_novel_rules_review_agent",
             passed_key="novel_review_passed",
             errors_key="novel_review_errors",
             feedback_key="novel_review_feedback",
@@ -120,7 +120,7 @@ def build_chapter_review_nodes(*, node_factory: NodeFactory, max_auto_review_ite
         "outline_review_node": make_outline_review_node(
             node_id="outline_review",
             entity_type="chapter_outline_rules",
-            reviewer="chapter_outline_review_agent",
+            reviewer="chapter_outline_rules_review_agent",
             passed_key="outline_review_passed",
             errors_key="outline_review_errors",
             feedback_key="outline_review_feedback",

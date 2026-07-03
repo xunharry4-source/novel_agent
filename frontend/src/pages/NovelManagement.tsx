@@ -21,6 +21,7 @@ import {
 } from '@mantine/core';
 import {
   IconBook,
+  IconClipboardList,
   IconEdit,
   IconFileText,
   IconListTree,
@@ -304,6 +305,7 @@ export const NovelManagement: React.FC = () => {
                   <Table.Td>
                     <Group gap="xs" wrap="nowrap">
                       <Button size="xs" variant="light" leftSection={<IconEdit size={14} />} onClick={(event) => { event.stopPropagation(); openEdit(novel); }}>修改</Button>
+                      <Button size="xs" variant="light" leftSection={<IconClipboardList size={14} />} onClick={(event) => { event.stopPropagation(); navigate(`/novels/${encodeURIComponent(novel.novel_id)}/chapter-outline-templates`); }}>大纲模板</Button>
                       <Button size="xs" variant="light" leftSection={<IconListTree size={14} />} onClick={(event) => { event.stopPropagation(); navigate(`/novels/${encodeURIComponent(novel.novel_id)}/outlines`); }}>大纲管理</Button>
                       <Button size="xs" variant="light" leftSection={<IconFileText size={14} />} onClick={(event) => { event.stopPropagation(); navigate(`/novels/${encodeURIComponent(novel.novel_id)}/chapters`); }}>章节管理</Button>
                       <Button size="xs" color="red" variant="light" leftSection={<IconTrash size={14} />} onClick={(event) => { event.stopPropagation(); setDeleteNovel(novel); }}>删除</Button>

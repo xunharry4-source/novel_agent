@@ -236,16 +236,16 @@ def make_full_chain(prefix: str) -> dict[str, str]:
     """创建世界、世界观、小说、大纲完整父级链路，并逐项查询确认。"""
     suffix = unique_suffix(prefix)
     world_id = f"world_{suffix}"
-    worldview_id = f"wv_{suffix}"
     novel_id = f"novel_{suffix}"
     outline_id = f"outline_{suffix}"
-    create_world(
+    created_world = create_world(
         world_id=world_id,
         name=f"World {suffix}",
         summary="真实测试世界：低魔蒸汽群岛。",
         forbidden_rules=["禁止凭空出现现代枪械", "禁止无代价复活"],
         basic_settings={"era": "蒸汽航海", "power_system": "潮汐水晶", "boundary": "群岛航线"},
     )
+    worldview_id = created_world["worldview_id"]
     create_worldview(world_id=world_id, worldview_id=worldview_id, name=f"Worldview {suffix}", summary="灯塔公会负责航线和潮汐水晶登记。")
     create_novel(
         world_id=world_id,

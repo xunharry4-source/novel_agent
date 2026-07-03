@@ -1,0 +1,92 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - button "open drawer" [ref=e6] [cursor=pointer]:
+        - img [ref=e7]
+      - generic [ref=e9]: 万象星际 Novel Agent
+  - list [ref=e14]:
+    - listitem [ref=e15]:
+      - button "世界层级" [ref=e16] [cursor=pointer]:
+        - img [ref=e18]
+        - generic [ref=e21]: 世界层级
+    - listitem [ref=e22]:
+      - button "世界观设定" [ref=e23] [cursor=pointer]:
+        - img [ref=e25]
+        - generic [ref=e28]: 世界观设定
+    - listitem [ref=e29]:
+      - button "星际图谱" [ref=e30] [cursor=pointer]:
+        - img [ref=e32]
+        - generic [ref=e35]: 星际图谱
+    - listitem [ref=e36]:
+      - button "设定知识库" [ref=e37] [cursor=pointer]:
+        - img [ref=e39]
+        - generic [ref=e42]: 设定知识库
+    - listitem [ref=e43]:
+      - button "小说项目管理" [ref=e44] [cursor=pointer]:
+        - img [ref=e46]
+        - generic [ref=e49]: 小说项目管理
+    - listitem [ref=e50]:
+      - button "用户信息" [ref=e51] [cursor=pointer]:
+        - img [ref=e53]
+        - generic [ref=e56]: 用户信息
+    - listitem [ref=e57]:
+      - button "登录/注册" [ref=e58] [cursor=pointer]:
+        - img [ref=e60]
+        - generic [ref=e63]: 登录/注册
+  - main [ref=e64]:
+    - generic [ref=e66]:
+      - generic [ref=e67]:
+        - generic [ref=e68]:
+          - heading "当前世界设定集" [level=6] [ref=e69]
+          - generic [ref=e71]: 一世界一库
+        - list [ref=e72]:
+          - generic [ref=e73]:
+            - img [ref=e74]
+            - paragraph [ref=e76]: 当前世界缺少自动创建的世界观设定库
+      - generic [ref=e77]:
+        - generic [ref=e78]:
+          - generic [ref=e79]:
+            - generic [ref=e80]:
+              - text: 世界
+              - generic [ref=e81]: "*"
+            - generic [ref=e82]:
+              - combobox "世界" [ref=e83] [cursor=pointer]: Diag World 8e262840 (world_diag_8e262840)
+              - textbox: world_diag_8e262840
+              - img
+              - group:
+                - generic: 世界 *
+          - generic [ref=e85]:
+            - img [ref=e87]
+            - textbox "搜索设定实体 (支持语义与关键字)..." [ref=e89]
+            - group
+          - button "新增设定" [disabled]:
+            - generic:
+              - img
+            - text: 新增设定
+          - button "导入设定" [disabled]:
+            - generic:
+              - img
+            - text: 导入设定
+          - button [disabled]:
+            - img
+          - group [ref=e90]:
+            - button "树视图" [pressed] [ref=e91] [cursor=pointer]:
+              - img [ref=e92]
+            - button "表格视图" [ref=e94] [cursor=pointer]:
+              - img [ref=e95]
+        - alert [ref=e98]:
+          - img [ref=e100]
+          - generic [ref=e102]: 当前世界缺少唯一世界观设定库，无法加载设定条目。
+        - generic [ref=e104]:
+          - generic [ref=e105]: /worldviews 会分页读取当前世界唯一设定库下的世界观设定；支持 md、json、xml、opml 导入并保留层级路径；新增和修改必须进入 Agent workflow，当前第 1 页，每页 20 条。
+          - generic [ref=e106]:
+            - generic [ref=e107]:
+              - generic [ref=e108]: 每页条数
+              - generic [ref=e109]:
+                - combobox "每页条数" [ref=e110] [cursor=pointer]: "20"
+                - textbox: "20"
+                - img
+                - group:
+                  - generic: 每页条数
+            - button "上一页" [disabled]
+            - button "下一页" [disabled]

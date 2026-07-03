@@ -14,9 +14,13 @@ from langgraph.types import interrupt
 from src.agents.review_nodes.novel_review import make_novel_review_node, make_novel_review_route
 from src.common.config_utils import get_config
 from src.common.lore_utils import get_langfuse_callback, get_llm, get_mongodb_db, get_unified_context, parse_json_safely
+from src.common.revision_mode_prompt import build_revision_mode_instruction
 
 
 AGENT_NAME = "novel_agent"
+INITIAL_EXPANSION_AGENT_NAME = "novel_agent_initial_expansion"
+MODIFY_CONTENT_AGENT_NAME = "novel_agent_modify_content"
+HUMAN_FEEDBACK_AGENT_NAME = "novel_agent_human_feedback_modify_content"
 ENTITY_TYPE = "novel"
 PRIMARY_FIELD = "summary"
 MAX_AUTO_REVIEW_ITERATIONS = 3
@@ -125,21 +129,23 @@ def _extract_llm_content(response: Any) -> str:
     return str(content or "")
 
 
-def _llm_metadata(raw_content: str, prompt: str) -> Dict[str, Any]:
+def _llm_metadata(raw_content: str, prompt: str, llm_agent_name: str) -> Dict[str, Any]:
     """生成本次 novel_agent LLM 调用的中文可审计元数据。"""
     config = get_config()
     provider = str(config.get("LLM_PROVIDER", "ollama")).lower()
-    agent_config = (config.get("AGENT_MODELS") or {}).get(AGENT_NAME) or {}
+    agent_config = (config.get("AGENT_MODELS") or {}).get(llm_agent_name) or {}
+    if not agent_config:
+        agent_config = (config.get("AGENT_MODELS") or {}).get(AGENT_NAME) or {}
     model_name = agent_config.get("model") if isinstance(agent_config, dict) else agent_config
     provider_config = (config.get("LLM_MODELS") or {}).get(provider) or {}
     if isinstance(provider_config, dict) and not model_name:
         model_name = provider_config.get("default")
-    return {"llm_invoked": True, "llm_agent_name": AGENT_NAME, "provider": provider, "model": model_name or config.get("DEFAULT_MODEL"), "json_mode": True, "raw_response_chars": len(raw_content), "prompt": prompt, "prompt_chars": len(prompt)}
+    return {"llm_invoked": True, "llm_agent_name": llm_agent_name, "provider": provider, "model": model_name or config.get("DEFAULT_MODEL"), "json_mode": True, "raw_response_chars": len(raw_content), "prompt": prompt, "prompt_chars": len(prompt)}
 
 
-def _invoke_llm(prompt: str) -> tuple[str, Dict[str, Any]]:
+def _invoke_llm(prompt: str, *, llm_agent_name: str) -> tuple[str, Dict[str, Any]]:
     """真实调用 novel_agent 对应 LLM；空响应直接报错，禁止伪成功。"""
-    llm = get_llm(json_mode=True, agent_name=AGENT_NAME)
+    llm = get_llm(json_mode=True, agent_name=llm_agent_name)
     config: Dict[str, Any] = {}
     callback = get_langfuse_callback()
     if callback:
@@ -147,8 +153,8 @@ def _invoke_llm(prompt: str) -> tuple[str, Dict[str, Any]]:
     response = llm.invoke(prompt, config=config if config else None)
     raw_content = _extract_llm_content(response)
     if not raw_content.strip():
-        raise ValueError(f"{AGENT_NAME} returned empty LLM response")
-    return raw_content, _llm_metadata(raw_content, prompt)
+        raise ValueError(f"{llm_agent_name} returned empty LLM response")
+    return raw_content, _llm_metadata(raw_content, prompt, llm_agent_name)
 
 
 def _node(node_id: str, status: str, node_input: Dict[str, Any], output: Dict[str, Any]) -> Dict[str, Any]:
@@ -230,7 +236,7 @@ def build_initial_expansion_prompt(action: str, payload: Dict[str, Any], message
 def generate_initial_expansion(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str] = None, feedback: str = "") -> Dict[str, Any]:
     """调用 LLM 生成小说初始扩充结果，确保第二节点真实使用 novel_agent LLM。"""
     prompt = build_initial_expansion_prompt(action, payload or {}, message, revision_mode=revision_mode, feedback=feedback)
-    raw_content, llm_call = _invoke_llm(prompt)
+    raw_content, llm_call = _invoke_llm(prompt, llm_agent_name=INITIAL_EXPANSION_AGENT_NAME)
     parsed = parse_json_safely(raw_content)
     if not isinstance(parsed, dict):
         raise ValueError(f"{AGENT_NAME} initial expansion returned non-object JSON: {raw_content[:500]}")
@@ -245,7 +251,7 @@ def generate_initial_expansion(action: str, payload: Dict[str, Any], message: st
     for field in ("forbidden_rules", "basic_settings"):
         if field in payload and field not in initial_payload:
             initial_payload[field] = payload[field]
-    return {"payload": initial_payload, "expanded_input": expanded_input, "llm_invoked": True, "agent_name": AGENT_NAME, "llm_agent_name": AGENT_NAME, "llm_call": llm_call, "raw_response": raw_content, "parsed_response": parsed, "expansion_notes": parsed.get("expansion_notes", "")}
+    return {"payload": initial_payload, "expanded_input": expanded_input, "llm_invoked": True, "agent_name": INITIAL_EXPANSION_AGENT_NAME, "llm_agent_name": INITIAL_EXPANSION_AGENT_NAME, "llm_call": llm_call, "raw_response": raw_content, "parsed_response": parsed, "expansion_notes": parsed.get("expansion_notes", "")}
 
 
 def build_modification_prompt(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str], feedback: str, expansion_error: str = "") -> str:
@@ -255,12 +261,19 @@ def build_modification_prompt(action: str, payload: Dict[str, Any], message: str
         worldview_id=str(payload.get("worldview_id") or "default_wv"),
     )
     retry_clause = f"\n【审查失败原因】{expansion_error}\n必须根据失败原因重新修正小说项目内容。" if expansion_error else ""
+    mode_instruction = build_revision_mode_instruction(
+        revision_mode,
+        entity_label="小说项目",
+        primary_field_label="payload.summary",
+        content_rewrite_scope="允许围绕小说介绍和摘要（introduction / summary）做全文级重写，但 forbidden_rules 与 basic_settings 只可做必要联动。",
+        full_rewrite_scope="允许整体重写 name、introduction、summary、forbidden_rules 和 basic_settings 等小说级业务内容。",
+    )
     return f"""【角色设定】
 你是一名小说项目编辑。你的唯一职责是修正小说项目本身，不得越权生成世界观条目、大纲或章节正文。
 
 【操作流程 (Mandatory Workflow)】
 1. 审查（Review）：检查当前小说项目与审查意见、人工反馈、父级 world/worldview 约束之间的冲突点。
-2. 修正（Modify）：根据【人工反馈或审查意见】和【修改模式】对小说项目做局部、精准修改，不得超范围改写。
+2. 修正（Modify）：根据【人工反馈或审查意见】和下面的【修改模式说明】修正小说项目。
 3. 扩展（Expand）：仅在修正完成后，补充必要细节，让故事主旨、主角方向、核心冲突和小说级规则更完整，但不得偏离反馈要求。 
 
 【输入信息】
@@ -275,6 +288,8 @@ def build_modification_prompt(action: str, payload: Dict[str, Any], message: str
 {json.dumps(payload or {}, ensure_ascii=False, indent=2)}
 【RAG 上下文】
 {rag_context}{retry_clause}
+【修改模式说明】
+{mode_instruction}
 
 【输出要求】
 1. 只返回合法 JSON，不得返回解释文字，不得写库。
@@ -310,10 +325,11 @@ def build_modification_prompt(action: str, payload: Dict[str, Any], message: str
 """
 
 
-def generate_content_modification(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str] = None, feedback: str = "", expansion_error: str = "") -> Dict[str, Any]:
+def generate_content_modification(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str] = None, feedback: str = "", expansion_error: str = "", llm_agent_name: Optional[str] = None) -> Dict[str, Any]:
     """调用 LLM 根据审查意见或人工反馈修改小说项目内容。"""
     prompt = build_modification_prompt(action, payload or {}, message, revision_mode=revision_mode, feedback=feedback, expansion_error=expansion_error)
-    raw_content, llm_call = _invoke_llm(prompt)
+    agent_name = llm_agent_name or MODIFY_CONTENT_AGENT_NAME
+    raw_content, llm_call = _invoke_llm(prompt, llm_agent_name=agent_name)
     parsed = parse_json_safely(raw_content)
     if not isinstance(parsed, dict):
         raise ValueError(f"{AGENT_NAME} modification returned non-object JSON: {raw_content[:500]}")
@@ -325,7 +341,17 @@ def generate_content_modification(action: str, payload: Dict[str, Any], message:
     for field in ("forbidden_rules", "basic_settings"):
         if field in payload and field not in modified_payload:
             modified_payload[field] = payload[field]
-    return {"payload": modified_payload, "llm_invoked": True, "agent_name": AGENT_NAME, "llm_agent_name": AGENT_NAME, "llm_call": llm_call, "raw_response": raw_content, "parsed_response": parsed, "modification_notes": parsed.get("modification_notes", ""), "change_summary": parsed.get("change_summary", "")}
+    return {
+        "payload": modified_payload,
+        "llm_invoked": True,
+        "agent_name": agent_name,
+        "llm_agent_name": agent_name,
+        "llm_call": llm_call,
+        "raw_response": raw_content,
+        "parsed_response": parsed,
+        "modification_notes": parsed.get("modification_notes", ""),
+        "change_summary": parsed.get("change_summary", ""),
+    }
 
 
 def input_node(state: NovelAgentState) -> NovelAgentState:
@@ -349,11 +375,23 @@ def initial_expansion_node(state: NovelAgentState) -> NovelAgentState:
 def modify_content_node(state: NovelAgentState) -> NovelAgentState:
     """修改内容节点：按审查意见或人工反馈调用 novel_agent LLM 修改小说内容。"""
     payload = dict(state.get("pending_payload") or state.get("payload") or {})
-    feedback = state.get("review_feedback") or state.get("feedback", "")
-    modification = generate_content_modification(state.get("action", "create"), payload, state.get("message", ""), revision_mode=state.get("revision_mode"), feedback=feedback, expansion_error=state.get("review_feedback", ""))
+    manual_edit = bool(state.get("manual_edit"))
+    user_feedback = str(state.get("feedback") or "")
+    review_feedback = str(state.get("review_feedback") or "")
+    feedback = user_feedback if manual_edit and user_feedback else review_feedback or user_feedback
+    llm_agent_name = HUMAN_FEEDBACK_AGENT_NAME if manual_edit else MODIFY_CONTENT_AGENT_NAME
+    modification = generate_content_modification(
+        state.get("action", "create"),
+        payload,
+        state.get("message", ""),
+        revision_mode=state.get("revision_mode"),
+        feedback=feedback,
+        expansion_error=feedback,
+        llm_agent_name=llm_agent_name,
+    )
     iteration = int(state.get("iterations") or 0) + 1
     nodes = list(state.get("nodes") or [])
-    nodes.append(_node("modify_content", "completed", {"payload": payload, "feedback": feedback, "revision_mode": state.get("revision_mode")}, {**modification, "iteration": iteration}))
+    nodes.append(_node("modify_content", "completed", {"payload": payload, "feedback": feedback, "revision_mode": state.get("revision_mode"), "manual_edit": manual_edit}, {**modification, "iteration": iteration}))
     return {"modification": modification, "pending_payload": modification["payload"], "nodes": nodes, "iterations": iteration, "current_node": "review", "status": "reviewing"}
 
 

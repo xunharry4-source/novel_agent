@@ -19,8 +19,9 @@
 >    - If the feature introduces new constraints or patterns, update the relevant `SKILL.md` files in `.gemini/skills/`.
 
 ## 2. Technical Stack
-- **Frontend**: NiceGUI (Python-based).
-- **Backend Handlers**: `app_api.py` (Flask-style handlers, though embedded in context).
+- **Frontend (primary)**: React + Vite + TypeScript in `frontend/` (`make start`, port 5174). All new UI work goes here only.
+- **Frontend (legacy, deprecated)**: NiceGUI in `ui/` — frozen; no new features. See `docs/frontend_strategy.md`.
+- **Backend Handlers**: `src/app_api.py` (Flask HTTP entrypoint).
 - **Logic**: LangGraph (State-machine guided workflows).
 - **Data**: JSONL for archival, ChromaDB for vector retrieval.
 

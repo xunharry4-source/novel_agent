@@ -1,0 +1,131 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - button "open drawer" [ref=e6] [cursor=pointer]:
+        - img [ref=e7]
+      - generic [ref=e9]: 万象星际 Novel Agent
+  - list [ref=e14]:
+    - listitem [ref=e15]:
+      - button "世界层级" [ref=e16] [cursor=pointer]:
+        - img [ref=e18]
+        - generic [ref=e21]: 世界层级
+    - listitem [ref=e22]:
+      - button "世界观设定" [ref=e23] [cursor=pointer]:
+        - img [ref=e25]
+        - generic [ref=e28]: 世界观设定
+    - listitem [ref=e29]:
+      - button "星际图谱" [ref=e30] [cursor=pointer]:
+        - img [ref=e32]
+        - generic [ref=e35]: 星际图谱
+    - listitem [ref=e36]:
+      - button "设定知识库" [ref=e37] [cursor=pointer]:
+        - img [ref=e39]
+        - generic [ref=e42]: 设定知识库
+    - listitem [ref=e43]:
+      - button "小说项目管理" [ref=e44] [cursor=pointer]:
+        - img [ref=e46]
+        - generic [ref=e49]: 小说项目管理
+    - listitem [ref=e50]:
+      - button "用户信息" [ref=e51] [cursor=pointer]:
+        - img [ref=e53]
+        - generic [ref=e56]: 用户信息
+    - listitem [ref=e57]:
+      - button "登录/注册" [ref=e58] [cursor=pointer]:
+        - img [ref=e60]
+        - generic [ref=e63]: 登录/注册
+  - main [ref=e64]:
+    - generic [ref=e225]:
+      - generic [ref=e226]:
+        - generic [ref=e227]:
+          - generic [ref=e228]:
+            - img [ref=e229]
+            - heading "分卷章节大纲管理" [level=2] [ref=e232]
+            - generic [ref=e234]: novel_ui_direct_edit_20260618
+          - paragraph [ref=e235]: "当前小说：页面直改验证小说。本页统一管理分卷章节大纲与章节内容；当前 `prose` 记录同时保存章节标题和正文。"
+        - generic [ref=e236]:
+          - button "返回分卷大纲页" [ref=e237] [cursor=pointer]:
+            - generic [ref=e238]:
+              - img [ref=e240]
+              - generic [ref=e243]: 返回分卷大纲页
+          - button "刷新" [ref=e244] [cursor=pointer]:
+            - generic [ref=e245]:
+              - img [ref=e247]
+              - generic [ref=e250]: 刷新
+          - button "直接新增分卷大纲" [ref=e251] [cursor=pointer]:
+            - generic [ref=e252]:
+              - img [ref=e254]
+              - generic [ref=e255]: 直接新增分卷大纲
+          - button "检查直接内容" [ref=e256] [cursor=pointer]:
+            - generic [ref=e257]:
+              - img [ref=e259]
+              - generic [ref=e262]: 检查直接内容
+          - button "工作流新增章节" [ref=e263] [cursor=pointer]:
+            - generic [ref=e264]:
+              - img [ref=e266]
+              - generic [ref=e267]: 工作流新增章节
+          - button "直接新增章节内容" [ref=e268] [cursor=pointer]:
+            - generic [ref=e269]:
+              - img [ref=e271]
+              - generic [ref=e272]: 直接新增章节内容
+      - alert [ref=e447]:
+        - generic [ref=e450]: 章节内容已直接修改，并完成真实接口回查：prose_mqjn02kws9byhd
+      - generic [ref=e274]:
+        - generic [ref=e275]:
+          - generic [ref=e276]: 分卷大纲筛选
+          - generic [ref=e277]:
+            - textbox "分卷大纲筛选" [ref=e278]:
+              - /placeholder: 全部分卷
+              - text: 第一卷：页面已直改 (outline_ui_direct_edit_20260618)
+            - button [ref=e280] [cursor=pointer]:
+              - img [ref=e281]
+        - generic [ref=e283]:
+          - generic [ref=e285]: 第 1 页
+          - generic [ref=e287]: 本页 1 条
+      - generic [ref=e288]:
+        - generic [ref=e291]:
+          - button [disabled] [ref=e292]:
+            - img [ref=e293]
+          - button "1" [ref=e295] [cursor=pointer]
+          - button [disabled] [ref=e296]:
+            - img [ref=e297]
+        - table [ref=e302]:
+          - rowgroup [ref=e303]:
+            - row "章节大纲 ID 标题 所属分卷 正文摘要 更新时间 操作" [ref=e304]:
+              - columnheader "章节大纲 ID" [ref=e305]
+              - columnheader "标题" [ref=e306]
+              - columnheader "所属分卷" [ref=e307]
+              - columnheader "正文摘要" [ref=e308]
+              - columnheader "更新时间" [ref=e309]
+              - columnheader "操作" [ref=e310]
+          - rowgroup [ref=e311]:
+            - row "prose_mqjn02kws9byhd 第一章：页面已直改 第一卷：页面已直改 页面直改后的章节正文 2026-06-18T15:11:16.436595+00:00 查看 检查内容 直接修改 工作流修改 删除" [ref=e451]:
+              - cell "prose_mqjn02kws9byhd" [ref=e360]:
+                - paragraph [ref=e361]: prose_mqjn02kws9byhd
+              - cell "第一章：页面已直改" [ref=e452]:
+                - paragraph [ref=e363]: 第一章：页面已直改
+              - cell "第一卷：页面已直改" [ref=e364]:
+                - paragraph [ref=e365]: 第一卷：页面已直改
+              - cell "页面直改后的章节正文" [ref=e453]:
+                - paragraph [ref=e367]: 页面直改后的章节正文
+              - cell "2026-06-18T15:11:16.436595+00:00" [ref=e454]:
+                - paragraph [ref=e369]: 2026-06-18T15:11:16.436595+00:00
+              - cell "查看 检查内容 直接修改 工作流修改 删除" [ref=e370]:
+                - generic [ref=e371]:
+                  - button "查看" [ref=e372] [cursor=pointer]:
+                    - generic [ref=e373]:
+                      - img [ref=e375]
+                      - generic [ref=e378]: 查看
+                  - button "检查内容" [ref=e379] [cursor=pointer]:
+                    - generic [ref=e380]:
+                      - img [ref=e382]
+                      - generic [ref=e385]: 检查内容
+                  - button "直接修改" [active] [ref=e386] [cursor=pointer]:
+                    - generic [ref=e387]:
+                      - img [ref=e389]
+                      - generic [ref=e393]: 直接修改
+                  - button "工作流修改" [ref=e394] [cursor=pointer]:
+                    - generic [ref=e396]: 工作流修改
+                  - button "删除" [ref=e397] [cursor=pointer]:
+                    - generic [ref=e398]:
+                      - img [ref=e400]
+                      - generic [ref=e403]: 删除

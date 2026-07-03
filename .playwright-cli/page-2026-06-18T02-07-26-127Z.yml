@@ -1,0 +1,203 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - button "open drawer" [ref=e6] [cursor=pointer]:
+        - img [ref=e7]
+      - generic [ref=e9]: 万象星际 Novel Agent
+  - list [ref=e14]:
+    - listitem [ref=e15]:
+      - button "世界层级" [ref=e16] [cursor=pointer]:
+        - img [ref=e18]
+        - generic [ref=e21]: 世界层级
+    - listitem [ref=e22]:
+      - button "世界观设定" [ref=e23] [cursor=pointer]:
+        - img [ref=e25]
+        - generic [ref=e28]: 世界观设定
+    - listitem [ref=e29]:
+      - button "星际图谱" [ref=e30] [cursor=pointer]:
+        - img [ref=e32]
+        - generic [ref=e35]: 星际图谱
+    - listitem [ref=e36]:
+      - button "设定知识库" [ref=e37] [cursor=pointer]:
+        - img [ref=e39]
+        - generic [ref=e42]: 设定知识库
+    - listitem [ref=e43]:
+      - button "小说项目管理" [ref=e44] [cursor=pointer]:
+        - img [ref=e46]
+        - generic [ref=e49]: 小说项目管理
+    - listitem [ref=e50]:
+      - button "用户信息" [ref=e51] [cursor=pointer]:
+        - img [ref=e53]
+        - generic [ref=e56]: 用户信息
+    - listitem [ref=e57]:
+      - button "登录/注册" [ref=e58] [cursor=pointer]:
+        - img [ref=e60]
+        - generic [ref=e63]: 登录/注册
+  - main [ref=e64]:
+    - generic [ref=e251]:
+      - generic [ref=e252]:
+        - generic [ref=e253]:
+          - button "返回" [ref=e254] [cursor=pointer]:
+            - img [ref=e256]
+          - generic [ref=e259]:
+            - heading "新增世界观设定工作流" [level=2] [ref=e260]
+            - paragraph [ref=e261]: 世界观设定专属 Dify-like 节点流与对话框；所有节点输入输出来自真实 hierarchy_agent_runs。
+        - generic [ref=e262]:
+          - generic [ref=e264]: worldview
+          - generic [ref=e266]: create
+          - button "刷新" [ref=e267] [cursor=pointer]:
+            - generic [ref=e268]:
+              - img [ref=e270]
+              - generic [ref=e273]: 刷新
+      - generic [ref=e275]:
+        - heading "新增表单" [level=4] [ref=e277]
+        - generic [ref=e278]:
+          - generic [ref=e280]:
+            - generic [ref=e282]:
+              - generic [ref=e283]: 世界
+              - generic [ref=e284]:
+                - textbox "世界" [ref=e285]: UI层级验证世界 dac5d70b (world_ui_dac5d70b)
+                - generic:
+                  - img
+            - generic [ref=e287]:
+              - generic [ref=e288]: 名称
+              - textbox "名称" [ref=e290]
+            - generic [ref=e292]:
+              - generic [ref=e293]: 新增后所在层级
+              - paragraph [ref=e294]: 该层级来自 /worldviews 中你点击的节点或设定条目。
+              - textbox "新增后所在层级" [disabled] [ref=e296]: 种族 > 碳基生命 > 新设定名称
+          - generic [ref=e297]:
+            - generic [ref=e298]: 摘要/设定
+            - textbox "摘要/设定" [ref=e300]
+          - generic [ref=e301]:
+            - generic [ref=e302]: 给 Agent 的消息
+            - textbox "给 Agent 的消息" [ref=e304]: 在 种族 > 碳基生命 下新增世界观设定
+        - button "启动工作流" [ref=e306] [cursor=pointer]:
+          - generic [ref=e307]:
+            - img [ref=e309]
+            - generic [ref=e311]: 启动工作流
+      - generic [ref=e313]:
+        - generic [ref=e314]:
+          - heading "工作流与节点信息" [level=4] [ref=e315]
+          - generic [ref=e316]:
+            - generic [ref=e318]: 当前节点：input
+            - generic [ref=e320]: 未写库
+        - generic [ref=e322]:
+          - generic [ref=e323]:
+            - application [ref=e325]:
+              - generic [ref=e327]:
+                - generic:
+                  - generic:
+                    - img
+                    - img:
+                      - group "Edge from input to draft" [ref=e328] [cursor=pointer]
+                    - img:
+                      - group "Edge from draft to review" [ref=e331] [cursor=pointer]
+                    - img:
+                      - group "Edge from review to human" [ref=e334] [cursor=pointer]
+                    - img:
+                      - group "Edge from human to apply" [ref=e337] [cursor=pointer]
+                  - generic:
+                    - group [ref=e340]: 步骤 1：接收输入 接收用户消息与业务 payload pending
+                    - group [ref=e343]: 步骤 2：LLM 生成草案 调用对应业务 Agent 的 LLM pending
+                    - group [ref=e346]: 步骤 3：业务审查 校验草案是否满足层级约束 pending
+                    - group [ref=e349]: 步骤 4：人工确认 等待用户批准、修改或中止 pending
+                    - group [ref=e352]: 步骤 5：真实写库 执行数据库写入 pending
+              - img
+              - generic "Control Panel" [ref=e355]:
+                - button "Zoom In" [ref=e356] [cursor=pointer]:
+                  - img [ref=e357]
+                - button "Zoom Out" [disabled]:
+                  - img
+                - button "Fit View" [ref=e359] [cursor=pointer]:
+                  - img [ref=e360]
+                - button "Toggle Interactivity" [ref=e362] [cursor=pointer]:
+                  - img [ref=e363]
+              - link "React Flow attribution" [ref=e366] [cursor=pointer]:
+                - /url: https://reactflow.dev
+                - text: React Flow
+            - generic [ref=e369]:
+              - generic [ref=e371]:
+                - generic [ref=e372]:
+                  - paragraph [ref=e373]: 当前节点
+                  - generic [ref=e375]: input
+                - paragraph [ref=e376]: 迭代轮次：0
+                - paragraph [ref=e377]: run_id：尚未启动
+              - generic [ref=e379]:
+                - generic [ref=e380]:
+                  - paragraph [ref=e381]: 写库结果
+                  - generic [ref=e383]: 未写库
+                - paragraph [ref=e384]: 人工批准前不会写库。
+          - generic [ref=e387]:
+            - tablist [ref=e388]:
+              - tab "步骤" [selected] [ref=e389] [cursor=pointer]:
+                - generic [ref=e390]: 步骤
+              - tab "对话" [ref=e391] [cursor=pointer]:
+                - generic [ref=e392]: 对话
+              - tab "节点" [ref=e393] [cursor=pointer]:
+                - generic [ref=e394]: 节点
+              - tab "Run" [ref=e395] [cursor=pointer]:
+                - generic [ref=e396]: Run
+            - tabpanel "步骤" [ref=e397]:
+              - generic [ref=e401]:
+                - generic [ref=e402]:
+                  - generic [ref=e403]:
+                    - generic [ref=e404]:
+                      - paragraph [ref=e405]: 步骤 1：接收输入
+                      - paragraph [ref=e406]: 接收用户消息与业务 payload
+                    - generic [ref=e408]: pending
+                  - paragraph [ref=e409]: 记录本次要新增或修改的实体、父级关系和人工意图，作为后续 Agent 草案生成的唯一输入基准。
+                - generic [ref=e410]:
+                  - generic [ref=e411]:
+                    - generic [ref=e412]:
+                      - paragraph [ref=e413]: 步骤 2：LLM 生成草案
+                      - paragraph [ref=e414]: 调用对应业务 Agent 的 LLM
+                    - generic [ref=e416]: pending
+                  - paragraph [ref=e417]: 根据实体类型调用对应 Agent，扩充 summary/content 并保留关键 ID。
+                - generic [ref=e418]:
+                  - generic [ref=e419]:
+                    - generic [ref=e420]:
+                      - paragraph [ref=e421]: 步骤 3：业务审查
+                      - paragraph [ref=e422]: 校验草案是否满足层级约束
+                    - generic [ref=e424]: pending
+                  - paragraph [ref=e425]: 检查必填字段、父级实体、章节归属和跨模块规则；世界模块跳过该步骤。
+                - generic [ref=e426]:
+                  - generic [ref=e427]:
+                    - generic [ref=e428]:
+                      - paragraph [ref=e429]: 步骤 4：人工确认
+                      - paragraph [ref=e430]: 等待用户批准、修改或中止
+                    - generic [ref=e432]: pending
+                  - paragraph [ref=e433]: 草案在这里暂停，不会写入数据库；用户可批准写库或触发下一轮 LLM 迭代。
+                - generic [ref=e434]:
+                  - generic [ref=e435]:
+                    - generic [ref=e436]:
+                      - paragraph [ref=e437]: 步骤 5：真实写库
+                      - paragraph [ref=e438]: 执行数据库写入
+                    - generic [ref=e440]: pending
+                  - paragraph [ref=e441]: 仅在人工批准后创建或更新世界、世界观、小说、大纲或章节，并返回真实写库结果。
+      - generic [ref=e443]:
+        - heading "用户处理" [level=4] [ref=e444]
+        - generic [ref=e445]:
+          - generic [ref=e446]: 对话反馈/修改意见
+          - textbox "对话反馈/修改意见" [ref=e448]
+        - generic [ref=e449]:
+          - generic [ref=e451]:
+            - generic [ref=e452]: 修改模式
+            - generic [ref=e453]:
+              - textbox "修改模式" [ref=e454] [cursor=pointer]: 局部重写
+              - generic:
+                - img
+          - generic [ref=e455]:
+            - button "提交修改" [disabled] [ref=e456]:
+              - generic [ref=e457]:
+                - img [ref=e459]
+                - generic [ref=e463]: 提交修改
+            - button "批准写库" [disabled] [ref=e464]:
+              - generic [ref=e465]:
+                - img [ref=e467]
+                - generic [ref=e470]: 批准写库
+            - button "中止" [disabled] [ref=e471]:
+              - generic [ref=e473]: 中止
+      - generic [ref=e475]:
+        - img [ref=e476]
+        - paragraph [ref=e479]: "该页面是 世界观设定 的独立工作流页。启动后节点、对话、审查和写库结果全部来自真实 `/api/hierarchy-agent/*` 接口。"

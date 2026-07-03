@@ -17,6 +17,7 @@ from src.agents.review_nodes.world_review import make_world_review_node, make_wo
 from src.agents.review_nodes.worldview_review import make_worldview_review_node, make_worldview_review_route
 from src.common.config_utils import get_config
 from src.common.lore_utils import get_langfuse_callback, get_llm, get_mongodb_db, get_unified_context, parse_json_safely
+from src.common.revision_mode_prompt import build_revision_mode_instruction
 
 
 def _now() -> str:
@@ -26,6 +27,7 @@ def _now() -> str:
 AGENT_NAME = "worldview_agent"
 INITIAL_EXPANSION_AGENT_NAME = "worldview_agent_initial_expansion"
 MODIFY_CONTENT_AGENT_NAME = "worldview_agent_modify_content"
+HUMAN_FEEDBACK_AGENT_NAME = "worldview_agent_human_feedback_modify_content"
 ENTITY_TYPE = "worldview"
 PRIMARY_FIELD = "summary"
 MAX_AUTO_REVIEW_ITERATIONS = 3
@@ -362,12 +364,19 @@ def build_modification_prompt(action: str, payload: Dict[str, Any], message: str
     world_rules = _load_world_forbidden_rules(world_id)
     review_feedback = feedback or expansion_error or "无额外修改意见。"
     retry_clause = f"\n【附加审查失败原因】\n{expansion_error}\n" if expansion_error else ""
+    mode_instruction = build_revision_mode_instruction(
+        revision_mode,
+        entity_label="世界观条目",
+        primary_field_label="payload.summary",
+        content_rewrite_scope="允许围绕世界观摘要 summary 做大段重写；如 name 未被明确要求修改，默认保留原值。",
+        full_rewrite_scope="允许整体重写 name、summary 和 expanded_input 中的分类与佳能关键词等世界观业务内容。",
+    )
     return f"""【角色设定】
 你是一名世界观编辑和设定守门人。你的唯一职责是修正世界观条目，确保所有内容严格遵循父级世界的禁止规则与已有设定。
 
 【操作流程 (Mandatory Workflow)】
 1. 审查（Review）：检查当前世界观与世界禁止规则、审查意见、人工反馈之间的冲突点。
-2. 修正（Modify）：根据【修改意见】和【修改模式】对世界观做局部、精准修改，不得超范围改写。
+2. 修正（Modify）：根据【修改意见】和下面的【修改模式说明】修正世界观条目。
 3. 扩展（Expand）：仅在修正完成后，补充必要细节、分类、核心规则和佳能关键词，但不得偏离反馈要求。
 
 【输入信息】
@@ -378,10 +387,9 @@ def build_modification_prompt(action: str, payload: Dict[str, Any], message: str
 【世界观草稿】
 {json.dumps(payload or {}, ensure_ascii=False, indent=2)}
 【修改意见】
-{json.dumps({
-    "修改范围": "只允许局部修改，只修改用户指定范围的内容，不要重写或者超出意见修改范围的内容",
-    "修改意见": review_feedback,
-}, ensure_ascii=False, indent=2)}
+{review_feedback}
+【修改模式说明】
+{mode_instruction}
 【世界禁止规则】
 {json.dumps(world_rules, ensure_ascii=False, indent=2)}{retry_clause}
 【参考上下文】
@@ -389,7 +397,7 @@ def build_modification_prompt(action: str, payload: Dict[str, Any], message: str
 
 【输出要求】
 1. 只返回合法 JSON，不得返回解释文字，不得写库。
-2. 必须保留 `world_id`、`worldview_id`、`target_id`、`name`，且只在修改意见允许的范围内修改内容。
+2. 必须保留 `world_id`、`worldview_id`、`target_id`；`name` 仅允许在 `full_rewrite` 或用户明确点名时修改。
 3. `summary` 必须消除超自然、超科学、违反世界禁止规则的内容。
 4. 补充细节时不得引入新的设定漂移或逻辑冲突。
 
@@ -424,10 +432,11 @@ def build_modification_prompt(action: str, payload: Dict[str, Any], message: str
 """
 
 
-def generate_content_modification(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str] = None, feedback: str = "", expansion_error: str = "") -> Dict[str, Any]:
+def generate_content_modification(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str] = None, feedback: str = "", expansion_error: str = "", llm_agent_name: Optional[str] = None) -> Dict[str, Any]:
     """调用 LLM 根据审查意见或人工反馈修改世界观内容。"""
     prompt = build_modification_prompt(action, payload or {}, message, revision_mode=revision_mode, feedback=feedback, expansion_error=expansion_error)
-    raw_content, llm_call = _invoke_llm(prompt, llm_agent_name=MODIFY_CONTENT_AGENT_NAME)
+    agent_name = llm_agent_name or MODIFY_CONTENT_AGENT_NAME
+    raw_content, llm_call = _invoke_llm(prompt, llm_agent_name=agent_name)
     parsed = parse_json_safely(raw_content)
     if not isinstance(parsed, dict):
         raise ValueError(f"{AGENT_NAME} modification returned non-object JSON: {raw_content[:500]}")
@@ -448,8 +457,8 @@ def generate_content_modification(action: str, payload: Dict[str, Any], message:
         "payload": modified_payload,
         "expanded_input": expanded_input,
         "llm_invoked": True,
-        "agent_name": MODIFY_CONTENT_AGENT_NAME,
-        "llm_agent_name": MODIFY_CONTENT_AGENT_NAME,
+        "agent_name": agent_name,
+        "llm_agent_name": agent_name,
         "llm_call": llm_call,
         "raw_response": raw_content,
         "parsed_response": parsed,
@@ -480,11 +489,28 @@ def initial_expansion_node(state: WorldviewAgentState) -> WorldviewAgentState:
 def modify_content_node(state: WorldviewAgentState) -> WorldviewAgentState:
     """修改内容节点：按审查意见或人工反馈调用 worldview_agent LLM 修改世界观内容。"""
     payload = dict(state.get("pending_payload") or state.get("payload") or {})
-    feedback = state.get("world_rule_review_feedback") or state.get("worldview_consistency_feedback") or state.get("review_feedback") or state.get("feedback", "")
-    modification = generate_content_modification(state.get("action", "create"), payload, state.get("message", ""), revision_mode=state.get("revision_mode"), feedback=feedback, expansion_error=feedback)
+    manual_edit = bool(state.get("manual_edit"))
+    user_feedback = str(state.get("feedback") or "")
+    review_feedback = str(
+        state.get("world_rule_review_feedback")
+        or state.get("worldview_consistency_feedback")
+        or state.get("review_feedback")
+        or ""
+    )
+    feedback = user_feedback if manual_edit and user_feedback else review_feedback or user_feedback
+    llm_agent_name = HUMAN_FEEDBACK_AGENT_NAME if manual_edit else MODIFY_CONTENT_AGENT_NAME
+    modification = generate_content_modification(
+        state.get("action", "create"),
+        payload,
+        state.get("message", ""),
+        revision_mode=state.get("revision_mode"),
+        feedback=feedback,
+        expansion_error=feedback,
+        llm_agent_name=llm_agent_name,
+    )
     iteration = int(state.get("iterations") or 0) + 1
     nodes = list(state.get("nodes") or [])
-    nodes.append(_node("modify_content", "completed", {"payload": payload, "feedback": feedback, "revision_mode": state.get("revision_mode")}, {**modification, "iteration": iteration}))
+    nodes.append(_node("modify_content", "completed", {"payload": payload, "feedback": feedback, "revision_mode": state.get("revision_mode"), "manual_edit": manual_edit}, {**modification, "iteration": iteration}))
     return {"modification": modification, "pending_payload": modification["payload"], "nodes": nodes, "iterations": iteration, "current_node": "world_rule_review", "status": "reviewing_world_rules"}
 
 

@@ -39,11 +39,14 @@ from src.agents import (
     worldview_agent,
     world_agent,
 )
+from src.common.config_utils import get_config
+from src.common.llm_identity_registry import LEGACY_SHARED_LLM_AGENT_NAMES, expected_llm_agent_name, validate_llm_identity_registry
 from src.common.lore_utils import get_mongodb_db
 
 
 app = Flask(__name__)
 CORS(app)
+validate_llm_identity_registry((get_config() or {}).get("AGENT_MODELS", {}))
 
 
 AGENT_MODULES = {
@@ -56,6 +59,8 @@ AGENT_MODULES = {
     "outline_summary_update": outline_summary_update_agent,
     "chapter_outline_summary_create": chapter_outline_summary_create_agent,
     "chapter_outline_summary_update": chapter_outline_summary_update_agent,
+    "chapter_intro_summary_create": chapter_content_summary_create_agent,
+    "chapter_intro_summary_update": chapter_content_summary_update_agent,
     "chapter_content_summary_create": chapter_content_summary_create_agent,
     "chapter_content_summary_update": chapter_content_summary_update_agent,
 }
@@ -124,19 +129,33 @@ AGENT_CAPABILITIES = {
         "id_fields": ["chapter_id", "id", "scene_id", "target_id"],
         "content_fields": ["name", "content", "downstream_summary"],
     },
-    "chapter_content_summary_create": {
-        "label": "新增章节内容总结工作流",
-        "description": "把章节正文压缩成下游摘要，单独写入 downstream_summaries。",
+    "chapter_intro_summary_create": {
+        "label": "新增章节简介与总结工作流",
+        "description": "基于章节正文生成章节简介与章节总结，并兼容写入 downstream_summary。",
         "required_context": ["outline_id"],
         "id_fields": ["chapter_id", "id", "scene_id", "target_id"],
-        "content_fields": ["name", "content", "downstream_summary"],
+        "content_fields": ["name", "content", "chapter_intro", "chapter_summary", "downstream_summary"],
+    },
+    "chapter_intro_summary_update": {
+        "label": "修改章节简介与总结工作流",
+        "description": "基于修改后的章节正文重新生成章节简介与章节总结，并兼容写入 downstream_summary。",
+        "required_context": ["outline_id"],
+        "id_fields": ["chapter_id", "id", "scene_id", "target_id"],
+        "content_fields": ["name", "content", "chapter_intro", "chapter_summary", "downstream_summary"],
+    },
+    "chapter_content_summary_create": {
+        "label": "新增章节简介与总结工作流（兼容旧类型）",
+        "description": "兼容旧 chapter_content_summary_create 类型，内部按章节简介与总结工作流处理。",
+        "required_context": ["outline_id"],
+        "id_fields": ["chapter_id", "id", "scene_id", "target_id"],
+        "content_fields": ["name", "content", "chapter_intro", "chapter_summary", "downstream_summary"],
     },
     "chapter_content_summary_update": {
-        "label": "修改章节内容总结工作流",
-        "description": "把修改后的章节正文压缩成下游摘要，单独写入 downstream_summaries。",
+        "label": "修改章节简介与总结工作流（兼容旧类型）",
+        "description": "兼容旧 chapter_content_summary_update 类型，内部按章节简介与总结工作流处理。",
         "required_context": ["outline_id"],
         "id_fields": ["chapter_id", "id", "scene_id", "target_id"],
-        "content_fields": ["name", "content", "downstream_summary"],
+        "content_fields": ["name", "content", "chapter_intro", "chapter_summary", "downstream_summary"],
     },
 }
 
@@ -162,8 +181,10 @@ AGENT_ALIASES = {
     "outline_summary_update": "outline_summary_update",
     "chapter_outline_summary_create": "chapter_outline_summary_create",
     "chapter_outline_summary_update": "chapter_outline_summary_update",
-    "chapter_content_summary_create": "chapter_content_summary_create",
-    "chapter_content_summary_update": "chapter_content_summary_update",
+    "chapter_intro_summary_create": "chapter_intro_summary_create",
+    "chapter_intro_summary_update": "chapter_intro_summary_update",
+    "chapter_content_summary_create": "chapter_intro_summary_create",
+    "chapter_content_summary_update": "chapter_intro_summary_update",
 }
 
 ACTION_ALIASES = {
@@ -534,6 +555,8 @@ def _enrich_payload(agent_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         "chapter",
         "chapter_outline_summary_create",
         "chapter_outline_summary_update",
+        "chapter_intro_summary_create",
+        "chapter_intro_summary_update",
         "chapter_content_summary_create",
         "chapter_content_summary_update",
     }:
@@ -555,6 +578,77 @@ def _run_node(module: Any, node_name: str, state: dict[str, Any]) -> dict[str, A
     return state
 
 
+SUMMARY_AUTO_RETRY_AGENT_TYPES = {
+    "outline_summary_create",
+    "outline_summary_update",
+    "chapter_outline_summary_create",
+    "chapter_outline_summary_update",
+    "chapter_intro_summary_create",
+    "chapter_intro_summary_update",
+    "chapter_content_summary_create",
+    "chapter_content_summary_update",
+}
+SUMMARY_AUTO_RETRY_LIMIT = 2
+SUMMARY_REVISION_AGENT_TYPES = {
+    "outline_summary_create",
+    "outline_summary_update",
+    "chapter_outline_summary_create",
+    "chapter_outline_summary_update",
+    "chapter_intro_summary_create",
+    "chapter_intro_summary_update",
+    "chapter_content_summary_create",
+    "chapter_content_summary_update",
+}
+
+
+def _allowed_revision_modes(agent_type: str) -> set[str]:
+    if agent_type in SUMMARY_REVISION_AGENT_TYPES:
+        return {"summary_rewrite"}
+    return {"partial_rewrite", "content_rewrite", "full_rewrite"}
+
+
+def _rename_last_node(state: dict[str, Any], expected_node_id: str, next_node_id: str) -> None:
+    nodes = list(state.get("nodes") or [])
+    if not nodes or nodes[-1].get("node_id") != expected_node_id:
+        return
+    renamed = copy.deepcopy(nodes[-1])
+    renamed["node_id"] = next_node_id
+    nodes[-1] = renamed
+    state["nodes"] = nodes
+
+
+def _run_review_sequence_with_auto_retry(module: Any, agent_type: str, state: dict[str, Any]) -> dict[str, Any]:
+    max_auto_retries = SUMMARY_AUTO_RETRY_LIMIT if agent_type in SUMMARY_AUTO_RETRY_AGENT_TYPES else 0
+    retry_count = 0
+
+    while True:
+        review_failed = False
+        for node_name in _review_sequence(agent_type):
+            _run_node(module, node_name, state)
+            if retry_count and node_name == "review_node":
+                _rename_last_node(state, "review", f"review_retry_{retry_count}")
+            if state.get("current_node") == "modify_content":
+                review_failed = True
+                break
+
+        if not review_failed:
+            state["auto_retry_count"] = retry_count
+            return state
+
+        if retry_count >= max_auto_retries:
+            state["status"] = "review_failed"
+            state["auto_retry_count"] = retry_count
+            return state
+
+        retry_count += 1
+        state["feedback"] = state.get("review_feedback") or state.get("feedback", "")
+        state["revision_mode"] = state.get("revision_mode") or "summary_rewrite"
+        result = module.modify_content_node(state)
+        if result:
+            state.update(result)
+        _rename_last_node(state, "modify_content", f"revision_retry_{retry_count}")
+
+
 def _run_until_human(agent_type: str, action: str, payload: dict[str, Any], message: str) -> dict[str, Any]:
     module = AGENT_MODULES[agent_type]
     state: dict[str, Any] = {
@@ -568,25 +662,7 @@ def _run_until_human(agent_type: str, action: str, payload: dict[str, Any], mess
     }
     _run_node(module, "input_node", state)
     _run_node(module, "initial_expansion_node", state)
-
-    review_sequences = {
-        "world": [],
-        "worldview": ["world_rule_review_node", "worldview_consistency_review_node"],
-        "novel": ["review_node"],
-        "outline": ["world_review_node", "worldview_review_node", "novel_review_node"],
-        "chapter": ["world_review_node", "worldview_review_node", "novel_review_node", "outline_review_node", "chapter_review_node"],
-        "outline_summary_create": ["review_node"],
-        "outline_summary_update": ["review_node"],
-        "chapter_outline_summary_create": ["review_node"],
-        "chapter_outline_summary_update": ["review_node"],
-        "chapter_content_summary_create": ["review_node"],
-        "chapter_content_summary_update": ["review_node"],
-    }
-    for node_name in review_sequences[agent_type]:
-        _run_node(module, node_name, state)
-        if state.get("current_node") == "modify_content":
-            state["status"] = "review_failed"
-            break
+    _run_review_sequence_with_auto_retry(module, agent_type, state)
 
     if state.get("current_node") not in {"modify_content", "human"}:
         state["current_node"] = "human"
@@ -615,11 +691,19 @@ def _rebuild_node_prompt(run: dict[str, Any], node: dict[str, Any]) -> str:
     message = str(run.get("message") or "")
     revision_mode = node_input.get("revision_mode")
     feedback = str(node_input.get("feedback") or "")
+    review_feedback = str(node_input.get("review_feedback") or "")
 
     if node_id == "initial_expansion" and hasattr(module, "build_initial_expansion_prompt"):
         return module.build_initial_expansion_prompt(run.get("action", "create"), payload, message, revision_mode=revision_mode, feedback=feedback)
     if node_id == "modify_content" and hasattr(module, "build_modification_prompt"):
-        return module.build_modification_prompt(run.get("action", "create"), payload, message, revision_mode=revision_mode, feedback=feedback, expansion_error=feedback)
+        return module.build_modification_prompt(
+            run.get("action", "create"),
+            payload,
+            message,
+            revision_mode=revision_mode,
+            feedback=feedback,
+            expansion_error=review_feedback,
+        )
 
     review_entity_type_map = {
         "world_rule_review": "worldview_world_rules",
@@ -652,53 +736,10 @@ def _rebuild_node_prompt(run: dict[str, Any], node: dict[str, Any]) -> str:
     return ""
 
 
-def _expected_llm_agent_name(run: dict[str, Any], node_id: str) -> str:
-    if run.get("agent_type") == "worldview":
-        if node_id == "initial_expansion":
-            return getattr(worldview_agent, "INITIAL_EXPANSION_AGENT_NAME", "worldview_agent_initial_expansion")
-        if node_id == "modify_content":
-            return getattr(worldview_agent, "MODIFY_CONTENT_AGENT_NAME", "worldview_agent_modify_content")
-    if run.get("agent_type") == "outline":
-        if node_id == "initial_expansion":
-            return getattr(outline_agent, "INITIAL_EXPANSION_AGENT_NAME", "outline_agent_initial_expansion")
-        if node_id == "modify_content":
-            return getattr(outline_agent, "MODIFY_CONTENT_AGENT_NAME", "outline_agent_modify_content")
-    if run.get("agent_type") == "chapter":
-        if node_id == "initial_expansion":
-            return getattr(chapter_agent, "INITIAL_EXPANSION_AGENT_NAME", "chapter_agent_initial_expansion")
-        if node_id == "modify_content":
-            return getattr(chapter_agent, "MODIFY_CONTENT_AGENT_NAME", "chapter_agent_modify_content")
-    if run.get("agent_type") == "outline_summary_create":
-        if node_id == "initial_expansion":
-            return getattr(outline_summary_create_agent, "INITIAL_EXPANSION_AGENT_NAME", "outline_summary_create_llm")
-        if node_id == "modify_content":
-            return getattr(outline_summary_create_agent, "MODIFY_CONTENT_AGENT_NAME", "outline_summary_create_modify_llm")
-    if run.get("agent_type") == "outline_summary_update":
-        if node_id == "initial_expansion":
-            return getattr(outline_summary_update_agent, "INITIAL_EXPANSION_AGENT_NAME", "outline_summary_update_llm")
-        if node_id == "modify_content":
-            return getattr(outline_summary_update_agent, "MODIFY_CONTENT_AGENT_NAME", "outline_summary_update_modify_llm")
-    if run.get("agent_type") == "chapter_outline_summary_create":
-        if node_id == "initial_expansion":
-            return getattr(chapter_outline_summary_create_agent, "INITIAL_EXPANSION_AGENT_NAME", "chapter_outline_summary_create_llm")
-        if node_id == "modify_content":
-            return getattr(chapter_outline_summary_create_agent, "MODIFY_CONTENT_AGENT_NAME", "chapter_outline_summary_create_modify_llm")
-    if run.get("agent_type") == "chapter_outline_summary_update":
-        if node_id == "initial_expansion":
-            return getattr(chapter_outline_summary_update_agent, "INITIAL_EXPANSION_AGENT_NAME", "chapter_outline_summary_update_llm")
-        if node_id == "modify_content":
-            return getattr(chapter_outline_summary_update_agent, "MODIFY_CONTENT_AGENT_NAME", "chapter_outline_summary_update_modify_llm")
-    if run.get("agent_type") == "chapter_content_summary_create":
-        if node_id == "initial_expansion":
-            return getattr(chapter_content_summary_create_agent, "INITIAL_EXPANSION_AGENT_NAME", "chapter_content_summary_create_llm")
-        if node_id == "modify_content":
-            return getattr(chapter_content_summary_create_agent, "MODIFY_CONTENT_AGENT_NAME", "chapter_content_summary_create_modify_llm")
-    if run.get("agent_type") == "chapter_content_summary_update":
-        if node_id == "initial_expansion":
-            return getattr(chapter_content_summary_update_agent, "INITIAL_EXPANSION_AGENT_NAME", "chapter_content_summary_update_llm")
-        if node_id == "modify_content":
-            return getattr(chapter_content_summary_update_agent, "MODIFY_CONTENT_AGENT_NAME", "chapter_content_summary_update_modify_llm")
-    return ""
+def _expected_llm_agent_name(run: dict[str, Any], node: dict[str, Any]) -> str:
+    node_id = str(node.get("node_id") or "")
+    node_input = node.get("input") if isinstance(node.get("input"), dict) else {}
+    return expected_llm_agent_name(str(run.get("agent_type") or ""), node_id, manual_edit=bool(node_input.get("manual_edit")))
 
 
 def _is_llm_node(node_id: str) -> bool:
@@ -726,15 +767,15 @@ def _hydrate_run_prompts(run: dict[str, Any]) -> dict[str, Any]:
         output = copy.deepcopy(next_node.get("output")) if isinstance(next_node.get("output"), dict) else {}
         llm_call = output.get("llm_call") if isinstance(output.get("llm_call"), dict) else {}
         node_id = str(next_node.get("node_id") or "")
-        expected_llm_agent_name = _expected_llm_agent_name(hydrated, node_id)
+        expected_llm_agent_name = _expected_llm_agent_name(hydrated, next_node)
         if _is_llm_node(node_id) and "llm_invoked" not in output:
             output["llm_invoked"] = True
         if expected_llm_agent_name:
-            if output.get("agent_name") in {"", None, "worldview_agent", "outline_agent", "chapter_agent"}:
+            if output.get("agent_name") in {"", None, *LEGACY_SHARED_LLM_AGENT_NAMES}:
                 output["agent_name"] = expected_llm_agent_name
-            if output.get("llm_agent_name") in {"", None, "worldview_agent", "outline_agent", "chapter_agent"}:
+            if output.get("llm_agent_name") in {"", None, *LEGACY_SHARED_LLM_AGENT_NAMES}:
                 output["llm_agent_name"] = expected_llm_agent_name
-            if llm_call.get("llm_agent_name") in {"", None, "worldview_agent", "outline_agent", "chapter_agent"}:
+            if llm_call.get("llm_agent_name") in {"", None, *LEGACY_SHARED_LLM_AGENT_NAMES}:
                 llm_call["llm_agent_name"] = expected_llm_agent_name
         if output.get("llm_invoked") and not llm_call.get("prompt"):
             prompt = _rebuild_node_prompt(hydrated, next_node)
@@ -785,6 +826,8 @@ def _review_sequence(agent_type: str) -> list[str]:
         "outline_summary_update": ["review_node"],
         "chapter_outline_summary_create": ["review_node"],
         "chapter_outline_summary_update": ["review_node"],
+        "chapter_intro_summary_create": ["review_node"],
+        "chapter_intro_summary_update": ["review_node"],
         "chapter_content_summary_create": ["review_node"],
         "chapter_content_summary_update": ["review_node"],
     }[agent_type]
@@ -793,7 +836,8 @@ def _review_sequence(agent_type: str) -> list[str]:
 def _request_changes_run(run: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
     module = AGENT_MODULES[run["agent_type"]]
     revision_mode = data.get("revision_mode")
-    if revision_mode not in {"partial_rewrite", "content_rewrite", "full_rewrite"}:
+    allowed_revision_modes = _allowed_revision_modes(run["agent_type"])
+    if revision_mode not in allowed_revision_modes:
         raise ValueError(f"Invalid revision_mode: {revision_mode}")
 
     patch_payload = data.get("payload") or {}
@@ -832,11 +876,7 @@ def _request_changes_run(run: dict[str, Any], data: dict[str, Any]) -> dict[str,
         nodes[-1]["input"] = modify_input
         state["nodes"] = nodes
 
-    for node_name in _review_sequence(run["agent_type"]):
-        _run_node(module, node_name, state)
-        if state.get("current_node") == "modify_content":
-            state["status"] = "review_failed"
-            break
+    _run_review_sequence_with_auto_retry(module, run["agent_type"], state)
 
     if state.get("status") != "review_failed":
         state["current_node"] = "human"
@@ -1420,6 +1460,60 @@ def get_novel():
     return _json({"status": "success", "novel": novel})
 
 
+@app.post("/api/novels/chapter-outline-templates/create")
+def create_chapter_outline_template():
+    data = _body()
+    novel_id = _require(data.get("novel_id"), "Missing novel_id")
+    if not _find_one("novels", {"novel_id": novel_id}):
+        return _json({"status": "error", "error": f"Parent Novel {novel_id} not found"}, 404)
+    template_id = f"tpl_{uuid.uuid4().hex[:8]}"
+    doc = {
+        "template_id": template_id,
+        "novel_id": novel_id,
+        "name": _require(data.get("name"), "Missing template name"),
+        "content": _require(data.get("content"), "Missing template content"),
+        "created_at": _now(),
+        "updated_at": _now(),
+    }
+    _db()["chapter_outline_templates"].insert_one(doc)
+    return _json({"status": "success", "template": doc})
+
+
+@app.post("/api/novels/chapter-outline-templates/update")
+def update_chapter_outline_template():
+    data = _body()
+    template_id = _require(data.get("template_id"), "Missing template_id")
+    template = _find_one("chapter_outline_templates", {"template_id": template_id})
+    if not template:
+        return _json({"status": "error", "error": f"Template not found: {template_id}"}, 404)
+    update = {key: data[key] for key in ("name", "content") if key in data}
+    update["updated_at"] = _now()
+    _db()["chapter_outline_templates"].update_one({"template_id": template_id}, {"$set": update})
+    return _json({"status": "success", "template_id": template_id})
+
+
+@app.delete("/api/novels/chapter-outline-templates/delete")
+def delete_chapter_outline_template():
+    data = _body()
+    template_id = _require(data.get("template_id"), "Missing template_id")
+    db = _db()
+    if not _find_one("chapter_outline_templates", {"template_id": template_id}):
+        return _json({"status": "error", "error": f"Template not found: {template_id}"}, 404)
+    db["chapter_outline_templates"].delete_many({"template_id": template_id})
+    return _json({"status": "success", "template_id": template_id})
+
+
+@app.get("/api/novels/chapter-outline-templates/list")
+def list_chapter_outline_templates():
+    novel_id = _require(request.args.get("novel_id"), "Missing novel_id")
+    if not _find_one("novels", {"novel_id": novel_id}):
+        return _json({"status": "error", "error": f"Novel not found: {novel_id}"}, 404)
+    if not request.args.get("page"):
+        return _json({"status": "error", "error": "Missing pagination"}, 400)
+    query = {"novel_id": novel_id}
+    return _json(_list_collection("chapter_outline_templates", query))
+
+
 @app.post("/api/outlines/create")
 def create_outline():
     data = _body()
@@ -1486,7 +1580,7 @@ def update_archive():
         })
         name = data.get("name") or data.get("title")
         if name: update_fields["name"] = update_fields["title"] = name
-        for key in ("content", "outline_id", "novel_id", "worldview_id", "world_id", "chapter_outline_id"):
+        for key in ("content", "outline_id", "novel_id", "worldview_id", "world_id", "chapter_outline_id", "template_id"):
             if key in data: update_fields[key] = data[key]
         db["prose"].update_one({"id": item_id}, {"$set": update_fields}, upsert=True)
     elif item_type == "worldview":

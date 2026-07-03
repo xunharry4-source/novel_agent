@@ -39,7 +39,7 @@ CONFIG_FIELD_MODULES = {
         "LANGFUSE_HOST",
     },
     "integrations.yml": {"DIFY_API_KEY", "DIFY_BASE_URL", "DIFY_DATASET_MAP"},
-    "secrets.yml": {"GOOGLE_API_KEY", "GOOGLE_API_KEYS", "OPENAI_API_KEY"},
+    "secrets.yml": {"GOOGLE_API_KEY", "GOOGLE_API_KEYS", "OPENAI_API_KEY", "LOCAL_API_KEY"},
 }
 
 
@@ -95,10 +95,10 @@ def load_config():
     
     # Merge env vars for sensitive keys and LLM defaults
     env_keys = [
-        "GOOGLE_API_KEY", "OPENAI_API_KEY", "SENTRY_DSN", 
+        "GOOGLE_API_KEY", "OPENAI_API_KEY", "LOCAL_API_KEY", "SENTRY_DSN", 
         "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST",
         "MONGO_URI", "MONGO_DB_NAME", "CHROMA_COLLECTION_NAME",
-        "LLM_PROVIDER", "DEFAULT_MODEL", "OLLAMA_BASE_URL",
+        "LLM_PROVIDER", "DEFAULT_MODEL", "OLLAMA_BASE_URL", "LOCAL_LLM_URL",
         "EMBEDDING_PROVIDER", "DEFAULT_EMBEDDING_MODEL", "OLLAMA_EMBEDDING_MODEL",
         "DEFAULT_LLM_PROVIDER", "DEFAULT_LLM_MODEL",
         "DB_PATH", "LOG_PATH"
@@ -124,8 +124,8 @@ def load_config():
 
     # Default values for essential non-sensitive fields if missing
     defaults = {
-        "LLM_PROVIDER": "ollama",
-        "DEFAULT_MODEL": "gemma4:e2b",
+        "LLM_PROVIDER": "local",
+        "DEFAULT_MODEL": "gemini-3-flash",
         "OLLAMA_BASE_URL": "http://localhost:11434/v1",
         "AUTONOMY_LEVEL": "balanced",
         "EMBEDDING_PROVIDER": "ollama",
@@ -147,9 +147,9 @@ def load_config():
                 "models": ["gpt-4-turbo-preview"]
             },
             "local": {
-                "default": "local-model",
-                "models": ["local-model"],
-                "base_url": "http://localhost:5000/v1"
+                "default": "gemini-3-flash",
+                "models": ["gemini-3-flash"],
+                "base_url": "http://localhost:8317/v1"
             }
         },
         "EMBEDDING_MODELS": {
@@ -166,7 +166,7 @@ def load_config():
         "DEFAULT_MODEL_MAP": {
             "gemini": "gemini-2.0-flash",
             "openai": "gpt-4-turbo-preview",
-            "local": "local-model",
+            "local": "gemini-3-flash",
             "ollama": "gemma4:e2b"
         },
         "DB_PATH": "data",
@@ -188,7 +188,7 @@ def load_config():
         if provider_name in {"ollama", "local"}:
             provider_models.setdefault(
                 "base_url",
-                config.get("OLLAMA_BASE_URL") if provider_name == "ollama" else config.get("LOCAL_LLM_URL", "http://localhost:5000/v1")
+                config.get("OLLAMA_BASE_URL") if provider_name == "ollama" else config.get("LOCAL_LLM_URL", "http://localhost:8317/v1")
             )
         llm_models[provider_name] = provider_models
 

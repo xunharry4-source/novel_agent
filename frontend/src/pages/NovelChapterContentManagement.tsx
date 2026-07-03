@@ -258,7 +258,7 @@ export const NovelChapterContentManagement: React.FC = () => {
   const openContentSummaryWorkflow = (contentRecord: ChapterRecord | null = selectedContent) => {
     if (!novel || !selectedOutlineId || !selectedChapterOutlineId || !contentRecord) return;
     const params = new URLSearchParams({
-      type: 'chapter_content_summary_create',
+      type: 'chapter_intro_summary_create',
       action: 'create',
       target_id: recordId(contentRecord),
       world_id: contentRecord.world_id || novel.world_id,

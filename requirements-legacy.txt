@@ -1,0 +1,9 @@
+# Legacy NiceGUI UI only — NOT required for the primary React frontend.
+# Install only if you still need `make start-legacy-ui` / `ui/main.py`.
+#
+#   pip install -r requirements-legacy.txt
+#
+# See docs/frontend_strategy.md
+
+-r requirements.txt
+nicegui

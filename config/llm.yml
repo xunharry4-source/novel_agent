@@ -1,5 +1,5 @@
-LLM_PROVIDER: ollama
-DEFAULT_MODEL: gemma4:e2b
+LLM_PROVIDER: local
+DEFAULT_MODEL: gemini-3-flash
 OLLAMA_BASE_URL: http://localhost:11434/v1
 REVIEW_AGENT_TIMEOUT: 180
 
@@ -7,7 +7,7 @@ DEFAULT_MODEL_MAP:
   gemini: gemma-4-31b-it
   openai: gpt-4-turbo-preview
   ollama: gemma4:e2b
-  local: gemma4:e2b
+  local: gemini-3-flash
 
 LLM_MODELS:
   ollama:
@@ -16,7 +16,7 @@ LLM_MODELS:
       - gemma4:e2b
     base_url: http://localhost:11434/v1
   gemini:
-    default: gemma-4-31b-it
+    default:
     models:
       - gemma-4-31b-it
   openai:
@@ -24,42 +24,69 @@ LLM_MODELS:
     models:
       - gpt-4-turbo-preview
   local:
-    default: gemma4:e2b
+    default: gemini-3-flash
     models:
-      - gemma4:e2b
-    base_url: http://localhost:5000/v1
+      - gemini-3-flash
+    base_url: http://localhost:8317/v1
 
 AGENT_MODELS:
-  comment: 如果需要特定 Agent 使用不同模型，请在此配置。留空则使用 DEFAULT_MODEL
+  comment: 所有 LLM 节点必须拥有独立 llm_agent_name，并在此保留独立配置槽位；禁止不同节点共用同一个 llm_agent_name
   world_agent: {}
+  world_agent_initial_expansion: {}
+  world_agent_modify_content: {}
   worldview_agent: {}
   worldview_agent_initial_expansion: {}
   worldview_agent_modify_content: {}
+  worldview_agent_human_feedback_modify_content: {}
   novel_agent: {}
+  novel_agent_initial_expansion: {}
+  novel_agent_modify_content: {}
+  novel_agent_human_feedback_modify_content: {}
   outline_agent: {}
   outline_agent_initial_expansion: {}
   outline_agent_modify_content: {}
+  outline_agent_human_feedback_modify_content: {}
   chapter_agent: {}
   chapter_agent_initial_expansion: {}
   chapter_agent_modify_content: {}
+  chapter_agent_human_feedback_modify_content: {}
   outline_summary_create_agent: {}
   outline_summary_create_llm: {}
   outline_summary_create_modify_llm: {}
+  outline_summary_create_human_feedback_modify_llm: {}
   outline_summary_update_agent: {}
   outline_summary_update_llm: {}
   outline_summary_update_modify_llm: {}
+  outline_summary_update_human_feedback_modify_llm: {}
   chapter_outline_summary_create_agent: {}
   chapter_outline_summary_create_llm: {}
   chapter_outline_summary_create_modify_llm: {}
+  chapter_outline_summary_create_human_feedback_modify_llm: {}
   chapter_outline_summary_update_agent: {}
   chapter_outline_summary_update_llm: {}
   chapter_outline_summary_update_modify_llm: {}
+  chapter_outline_summary_update_human_feedback_modify_llm: {}
   chapter_content_summary_create_agent: {}
   chapter_content_summary_create_llm: {}
   chapter_content_summary_create_modify_llm: {}
+  chapter_content_summary_create_human_feedback_modify_llm: {}
   chapter_content_summary_update_agent: {}
   chapter_content_summary_update_llm: {}
   chapter_content_summary_update_modify_llm: {}
+  chapter_content_summary_update_human_feedback_modify_llm: {}
+  worldview_world_rules_review_agent: {}
+  worldview_consistency_review_agent: {}
+  novel_world_rules_review_agent: {}
+  outline_world_rules_review_agent: {}
+  outline_worldview_rules_review_agent: {}
+  outline_novel_rules_review_agent: {}
+  chapter_world_rules_review_agent: {}
+  chapter_worldview_rules_review_agent: {}
+  chapter_novel_rules_review_agent: {}
+  chapter_outline_rules_review_agent: {}
+  chapter_chapter_outline_rules_review_agent: {}
+  chapter_consistency_review_agent: {}
+  chapter_plot_errors_review_agent: {}
   world_review_agent: {}
   worldview_review_agent: {}
   novel_review_agent: {}

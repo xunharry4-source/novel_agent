@@ -17,11 +17,13 @@ from src.agents.review_nodes.world_review import make_world_review_node, make_wo
 from src.agents.review_nodes.worldview_review import make_worldview_review_node, make_worldview_review_route
 from src.common.config_utils import get_config
 from src.common.lore_utils import get_langfuse_callback, get_llm, get_mongodb_db, get_unified_context, parse_json_safely
+from src.common.revision_mode_prompt import build_revision_mode_instruction
 
 
 AGENT_NAME = "outline_agent"
 INITIAL_EXPANSION_AGENT_NAME = "outline_agent_initial_expansion"
 MODIFY_CONTENT_AGENT_NAME = "outline_agent_modify_content"
+HUMAN_FEEDBACK_AGENT_NAME = "outline_agent_human_feedback_modify_content"
 ENTITY_TYPE = "outline"
 PRIMARY_FIELD = "summary"
 MAX_AUTO_REVIEW_ITERATIONS = 3
@@ -250,15 +252,19 @@ def _build_outline_task_context(
     revision_mode: Optional[str],
     feedback: str,
     expansion_error: str = "",
+    user_feedback: str = "",
+    review_feedback: str = "",
 ) -> str:
     task_context = {
         "action": action,
         "message": message,
         "revision_mode": revision_mode or "initial_expansion",
-        "feedback": feedback,
-        "expansion_error": expansion_error,
         "payload": payload or {},
     }
+    if user_feedback or feedback:
+        task_context["user_feedback"] = user_feedback or feedback
+    if review_feedback or expansion_error:
+        task_context["review_feedback"] = review_feedback or expansion_error
     return json.dumps(task_context, ensure_ascii=False, indent=2)
 
 
@@ -459,6 +465,8 @@ def generate_initial_expansion(action: str, payload: Dict[str, Any], message: st
 
 def build_modification_prompt(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str], feedback: str, expansion_error: str = "") -> str:
     """构造 outline_agent 修改内容 Prompt，使用结构化模板明确局部修正任务。"""
+    user_feedback = str(feedback or "").strip()
+    review_feedback = str(expansion_error or "").strip()
     rag_context = get_unified_context(
         f"{message}\n{payload.get('name', '')}\n{payload.get('summary', '')}",
         outline_id=str(payload.get("outline_id") or payload.get("target_id") or "default"),
@@ -469,16 +477,25 @@ def build_modification_prompt(action: str, payload: Dict[str, Any], message: str
         payload or {},
         message,
         revision_mode=revision_mode,
-        feedback=feedback,
-        expansion_error=expansion_error,
+        feedback=user_feedback,
+        expansion_error=review_feedback,
+        user_feedback=user_feedback,
+        review_feedback=review_feedback,
+    )
+    mode_instruction = build_revision_mode_instruction(
+        revision_mode,
+        entity_label="分卷大纲",
+        primary_field_label="payload.summary",
+        content_rewrite_scope="允许围绕大纲正文 summary 做大段或全文级重写；如标题 name 未被明确要求修改，默认保留原值。",
+        full_rewrite_scope="允许整体重写 name、summary 以及为结构一致性所必需的剧情编排说明。",
     )
     return f"""【角色设定】
 你是一名小说大纲修订编辑。
 
 你的任务是：
 保留原有大纲全部内容，
-根据修改意见修正指定问题，
-并在必要时补强细节、冲突、因果链和章节内容。
+根据用户反馈和系统审查问题定点修订当前大纲，
+只在完成修正所必需时补充缺失的因果或约束说明。
 
 ────────────────────────
 
@@ -496,20 +513,21 @@ summary 为当前完整大纲正文。
 【任务上下文】
 {task_context}
 
+【用户反馈】
+{user_feedback or "无"}
+
+【系统审查问题】
+{review_feedback or "无"}
+
 【RAG 上下文】
 {rag_context}
 
+【修改模式说明】
+{mode_instruction}
+
 ────────────────────────
 
-【修改规则】
-本任务是：修改并扩写（Modify + Expand）
-不是：
-* 总结
-* 概括
-* 提炼
-* 压缩
-* 全盘重写
-
+【通用修订规则】
 必须保留：
 * 所有未被要求删除的章节
 * 所有未被要求删除的事件
@@ -518,25 +536,25 @@ summary 为当前完整大纲正文。
 * 所有未被要求删除的势力
 * 所有未被要求删除的伏笔
 
-不得删除未被点名修改的内容。
+不得删除未被允许删除的内容。
 不得跳过原剧情。
-不得合并多个事件。
+不得脱离父级约束另起设定。
+不得合并多个关键事件。
 
 ────────────────────────
 
 【修改内容】
-优先处理修改意见直接点名的问题。
-然后在相关位置补强：
-* 事件过程
-* 冲突升级过程
-* 人物行为逻辑
-* 势力互动
-* 因果链
-* 阶段结果
-* 后续影响
+优先处理用户反馈直接点名的问题。
+如果存在系统审查问题，必须逐条修正。
+只允许补充为完成修正所必需的内容，例如：
+* 缺失的因果链
+* 必要的世界观约束说明
+* 被用户点名要求补充的局部逻辑
 
 禁止只修改措辞。
 禁止同义改写。
+禁止为了“补长”而新增无关剧情。
+禁止把修改任务改写成重新创作。
 
 ────────────────────────
 
@@ -561,10 +579,10 @@ summary 为当前完整大纲正文。
 
 【长度规则】
 修改后内容长度：
-不得低于原文。
+不得低于原文，除非用户明确要求删除内容。
 
 如果修改范围很小，
-至少保留原文总量不缩短。
+应保持原文主体结构与篇幅基本不变。
 
 禁止输出比输入更短。
 
@@ -572,7 +590,7 @@ summary 为当前完整大纲正文。
 
 【输出规则】
 payload.summary：
-写修改并补强后的完整大纲。
+写按意见修正后的完整大纲。
 不是摘要。
 不是概述。
 不是总结。
@@ -582,16 +600,13 @@ payload.summary：
 
 【执行顺序】
 Review：
-检查父级约束与修改意见。
+逐条读取用户反馈与系统审查问题。
 
 Modify：
-先按修改意见修正。
-
-Expand：
-只在相关位置补强细节。
+只修正被指出的问题。
 
 Validate：
-检查是否遗漏原剧情，是否误删未被点名修改内容。
+检查是否遗漏原剧情，是否误删未被点名修改内容，是否引入新的设定冲突。
 
 如果发现输出比原文更短，
 或出现摘要化倾向，
@@ -606,7 +621,7 @@ Validate：
 【输出要求】
 1. 只返回合法 JSON，不得返回解释文字，不得写库。
 2. 必须保留输入中的 novel_id、world_id、worldview_id、outline_id、target_id 和 name。
-3. `payload.summary` 必须是修改并补强后的完整大纲正文，不得摘要化、概述化、压缩化。
+3. `payload.summary` 必须是按意见修正后的完整大纲正文，不得摘要化、概述化、压缩化。
 4. 输出内容必须聚焦大纲结构修改，不得漂移到正式章节正文、小说项目或世界观条目。
 5. 输出 JSON 示例里的占位符只是结构说明，不是让你原样输出这些方括号文字。
 
@@ -620,7 +635,7 @@ Validate：
     "outline_id": "[保留输入中的 outline_id]",
     "target_id": "[保留输入中的 target_id]",
     "name": "[大纲名称]",
-    "summary": "[按修改意见修正并补强后的完整大纲]"
+    "summary": "[按意见修正后的完整大纲]"
   }},
   "modification_notes": "[本轮具体修正了哪些章节、冲突或结构]",
   "change_summary": "[相对输入大纲的修改摘要]"
@@ -628,10 +643,11 @@ Validate：
 """
 
 
-def generate_content_modification(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str] = None, feedback: str = "", expansion_error: str = "") -> Dict[str, Any]:
+def generate_content_modification(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str] = None, feedback: str = "", expansion_error: str = "", llm_agent_name: Optional[str] = None) -> Dict[str, Any]:
     """调用 LLM 根据审查意见或人工反馈修改大纲内容。"""
     prompt = build_modification_prompt(action, payload or {}, message, revision_mode=revision_mode, feedback=feedback, expansion_error=expansion_error)
-    raw_content, llm_call = _invoke_llm(prompt, llm_agent_name=MODIFY_CONTENT_AGENT_NAME)
+    agent_name = llm_agent_name or MODIFY_CONTENT_AGENT_NAME
+    raw_content, llm_call = _invoke_llm(prompt, llm_agent_name=agent_name)
     parsed = parse_json_safely(raw_content)
     if not isinstance(parsed, dict):
         raise ValueError(f"{AGENT_NAME} modification returned non-object JSON: {raw_content[:500]}")
@@ -641,7 +657,7 @@ def generate_content_modification(action: str, payload: Dict[str, Any], message:
     _assert_outline_not_simplified(payload.get("summary", ""), modified_payload.get("summary", ""), stage="modify_content")
     if payload.get("name") and revision_mode != "full_rewrite":
         modified_payload["name"] = payload["name"]
-    return {"payload": modified_payload, "llm_invoked": True, "agent_name": MODIFY_CONTENT_AGENT_NAME, "llm_agent_name": MODIFY_CONTENT_AGENT_NAME, "llm_call": llm_call, "raw_response": raw_content, "parsed_response": parsed, "modification_notes": parsed.get("modification_notes", ""), "change_summary": parsed.get("change_summary", "")}
+    return {"payload": modified_payload, "llm_invoked": True, "agent_name": agent_name, "llm_agent_name": agent_name, "llm_call": llm_call, "raw_response": raw_content, "parsed_response": parsed, "modification_notes": parsed.get("modification_notes", ""), "change_summary": parsed.get("change_summary", "")}
 
 
 def input_node(state: OutlineAgentState) -> OutlineAgentState:
@@ -665,18 +681,49 @@ def initial_expansion_node(state: OutlineAgentState) -> OutlineAgentState:
 def modify_content_node(state: OutlineAgentState) -> OutlineAgentState:
     """修改内容节点：按审查意见或人工反馈调用 outline_agent LLM 修改大纲内容。"""
     payload = dict(state.get("pending_payload") or state.get("payload") or {})
-    feedback = state.get("world_review_feedback") or state.get("worldview_review_feedback") or state.get("novel_review_feedback") or state.get("review_feedback") or state.get("feedback", "")
-    modification = generate_content_modification(state.get("action", "create"), payload, state.get("message", ""), revision_mode=state.get("revision_mode"), feedback=feedback, expansion_error=feedback)
+    manual_edit = bool(state.get("manual_edit"))
+    user_feedback = str(state.get("feedback") or "")
+    review_feedback = (
+        state.get("world_review_feedback")
+        or state.get("worldview_review_feedback")
+        or state.get("novel_review_feedback")
+        or state.get("review_feedback")
+        or ""
+    )
+    feedback = user_feedback if manual_edit and user_feedback else str(review_feedback or "") or user_feedback
+    llm_agent_name = HUMAN_FEEDBACK_AGENT_NAME if manual_edit else MODIFY_CONTENT_AGENT_NAME
+    modification = generate_content_modification(
+        state.get("action", "create"),
+        payload,
+        state.get("message", ""),
+        revision_mode=state.get("revision_mode"),
+        feedback=feedback,
+        expansion_error=feedback,
+        llm_agent_name=llm_agent_name,
+    )
     iteration = int(state.get("iterations") or 0) + 1
     nodes = list(state.get("nodes") or [])
-    nodes.append(_node("modify_content", "completed", {"payload": payload, "feedback": feedback, "revision_mode": state.get("revision_mode")}, {**modification, "iteration": iteration}))
+    nodes.append(
+        _node(
+            "modify_content",
+            "completed",
+            {
+                "payload": payload,
+                "feedback": feedback,
+                "review_feedback": review_feedback,
+                "revision_mode": state.get("revision_mode"),
+                "manual_edit": manual_edit,
+            },
+            {**modification, "iteration": iteration},
+        )
+    )
     return {"modification": modification, "pending_payload": modification["payload"], "nodes": nodes, "iterations": iteration, "current_node": "world_review", "status": "reviewing_world"}
 
 
 world_review_node = make_world_review_node(
     node_id="world_review",
     entity_type="outline_world_rules",
-    reviewer="outline_world_review_agent",
+    reviewer="outline_world_rules_review_agent",
     passed_key="world_review_passed",
     errors_key="world_review_errors",
     feedback_key="world_review_feedback",
@@ -693,7 +740,7 @@ route_after_world_review = make_world_review_route(
 worldview_review_node = make_worldview_review_node(
     node_id="worldview_review",
     entity_type="outline_worldview_rules",
-    reviewer="outline_worldview_review_agent",
+    reviewer="outline_worldview_rules_review_agent",
     passed_key="worldview_review_passed",
     errors_key="worldview_review_errors",
     feedback_key="worldview_review_feedback",
@@ -710,7 +757,7 @@ route_after_worldview_review = make_worldview_review_route(
 novel_review_node = make_novel_review_node(
     node_id="novel_review",
     entity_type="outline_novel_rules",
-    reviewer="outline_novel_review_agent",
+    reviewer="outline_novel_rules_review_agent",
     passed_key="novel_review_passed",
     errors_key="novel_review_errors",
     feedback_key="novel_review_feedback",

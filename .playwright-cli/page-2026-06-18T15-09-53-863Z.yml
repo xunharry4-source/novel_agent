@@ -1,0 +1,115 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - button "open drawer" [ref=e6] [cursor=pointer]:
+        - img [ref=e7]
+      - generic [ref=e9]: 万象星际 Novel Agent
+  - list [ref=e14]:
+    - listitem [ref=e15]:
+      - button "世界层级" [ref=e16] [cursor=pointer]:
+        - img [ref=e18]
+        - generic [ref=e21]: 世界层级
+    - listitem [ref=e22]:
+      - button "世界观设定" [ref=e23] [cursor=pointer]:
+        - img [ref=e25]
+        - generic [ref=e28]: 世界观设定
+    - listitem [ref=e29]:
+      - button "星际图谱" [ref=e30] [cursor=pointer]:
+        - img [ref=e32]
+        - generic [ref=e35]: 星际图谱
+    - listitem [ref=e36]:
+      - button "设定知识库" [ref=e37] [cursor=pointer]:
+        - img [ref=e39]
+        - generic [ref=e42]: 设定知识库
+    - listitem [ref=e43]:
+      - button "小说项目管理" [ref=e44] [cursor=pointer]:
+        - img [ref=e46]
+        - generic [ref=e49]: 小说项目管理
+    - listitem [ref=e50]:
+      - button "用户信息" [ref=e51] [cursor=pointer]:
+        - img [ref=e53]
+        - generic [ref=e56]: 用户信息
+    - listitem [ref=e57]:
+      - button "登录/注册" [ref=e58] [cursor=pointer]:
+        - img [ref=e60]
+        - generic [ref=e63]: 登录/注册
+  - main [ref=e64]:
+    - generic [ref=e66]:
+      - generic [ref=e67]:
+        - generic [ref=e68]:
+          - generic [ref=e69]:
+            - img [ref=e70]
+            - heading "分卷大纲管理" [level=2] [ref=e71]
+            - generic [ref=e73]: novel_ui_direct_edit_20260618
+          - paragraph [ref=e74]: 当前小说：页面直改验证小说。本页只管理分卷大纲；分卷章节大纲请进入独立章节页。
+        - generic [ref=e75]:
+          - button "返回小说列表" [ref=e76] [cursor=pointer]:
+            - generic [ref=e77]:
+              - img [ref=e79]
+              - generic [ref=e82]: 返回小说列表
+          - button "刷新" [ref=e83] [cursor=pointer]:
+            - generic [ref=e84]:
+              - img [ref=e86]
+              - generic [ref=e89]: 刷新
+          - button "分卷章节大纲页" [ref=e90] [cursor=pointer]:
+            - generic [ref=e91]:
+              - img [ref=e93]
+              - generic [ref=e96]: 分卷章节大纲页
+          - button "工作流新增分卷大纲" [ref=e97] [cursor=pointer]:
+            - generic [ref=e98]:
+              - img [ref=e100]
+              - generic [ref=e101]: 工作流新增分卷大纲
+          - button "直接新增分卷大纲" [ref=e102] [cursor=pointer]:
+            - generic [ref=e103]:
+              - img [ref=e105]
+              - generic [ref=e106]: 直接新增分卷大纲
+      - alert [ref=e217]:
+        - generic [ref=e220]: 分卷大纲已直接修改，并完成真实接口回查：outline_ui_direct_edit_20260618
+      - generic [ref=e107]:
+        - generic [ref=e108]:
+          - generic [ref=e109]:
+            - generic [ref=e112]: 第 1 页
+            - generic [ref=e114]: 本页 1 条
+          - generic [ref=e116]:
+            - button [disabled] [ref=e117]:
+              - img [ref=e118]
+            - button "1" [ref=e120] [cursor=pointer]
+            - button [disabled] [ref=e121]:
+              - img [ref=e122]
+        - table [ref=e127]:
+          - rowgroup [ref=e128]:
+            - row "分卷大纲 ID 卷名 简介 / 摘要 世界观 更新时间 操作" [ref=e129]:
+              - columnheader "分卷大纲 ID" [ref=e130]
+              - columnheader "卷名" [ref=e131]
+              - columnheader "简介 / 摘要" [ref=e132]
+              - columnheader "世界观" [ref=e133]
+              - columnheader "更新时间" [ref=e134]
+              - columnheader "操作" [ref=e135]
+          - rowgroup [ref=e136]:
+            - row "outline_ui_direct_edit_20260618 第一卷：页面已直改 页面直改后的分卷正文 页面直改验证世界 世界观设定集 2026-06-18T15:09:52.861727+00:00 章节大纲 直接修改 工作流修改 删除" [ref=e221]:
+              - cell "outline_ui_direct_edit_20260618" [ref=e141]:
+                - paragraph [ref=e142]: outline_ui_direct_edit_20260618
+              - cell "第一卷：页面已直改" [ref=e222]:
+                - paragraph [ref=e144]: 第一卷：页面已直改
+              - cell "页面直改后的分卷正文" [ref=e223]:
+                - paragraph [ref=e146]: 页面直改后的分卷正文
+              - cell "页面直改验证世界 世界观设定集" [ref=e147]:
+                - paragraph [ref=e148]: 页面直改验证世界 世界观设定集
+              - cell "2026-06-18T15:09:52.861727+00:00" [ref=e224]:
+                - paragraph [ref=e150]: 2026-06-18T15:09:52.861727+00:00
+              - cell "章节大纲 直接修改 工作流修改 删除" [ref=e151]:
+                - generic [ref=e152]:
+                  - button "章节大纲" [ref=e153] [cursor=pointer]:
+                    - generic [ref=e154]:
+                      - img [ref=e156]
+                      - generic [ref=e159]: 章节大纲
+                  - button "直接修改" [active] [ref=e160] [cursor=pointer]:
+                    - generic [ref=e161]:
+                      - img [ref=e163]
+                      - generic [ref=e167]: 直接修改
+                  - button "工作流修改" [ref=e168] [cursor=pointer]:
+                    - generic [ref=e170]: 工作流修改
+                  - button "删除" [ref=e171] [cursor=pointer]:
+                    - generic [ref=e172]:
+                      - img [ref=e174]
+                      - generic [ref=e177]: 删除

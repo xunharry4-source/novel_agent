@@ -8,11 +8,13 @@ from langgraph.types import interrupt
 
 from src.common.config_utils import get_config
 from src.common.lore_utils import get_langfuse_callback, get_llm, get_mongodb_db, parse_json_safely
+from src.common.revision_mode_prompt import build_summary_revision_mode_instruction
 
 
 AGENT_NAME = "chapter_outline_summary_create_agent"
 INITIAL_EXPANSION_AGENT_NAME = "chapter_outline_summary_create_llm"
 MODIFY_CONTENT_AGENT_NAME = "chapter_outline_summary_create_modify_llm"
+HUMAN_FEEDBACK_AGENT_NAME = "chapter_outline_summary_create_human_feedback_modify_llm"
 ENTITY_TYPE = "chapter_outline_summary_create"
 PRIMARY_FIELD = "content"
 SUMMARY_SCOPE = "chapter_outline"
@@ -199,6 +201,12 @@ def generate_initial_expansion(action: str, payload: Dict[str, Any], message: st
 
 def build_modification_prompt(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str], feedback: str, expansion_error: str = "") -> str:
     task_context = _build_task_context(action, payload or {}, message, revision_mode=revision_mode, feedback=feedback)
+    mode_instruction = build_summary_revision_mode_instruction(
+        revision_mode,
+        entity_label="章节大纲下游摘要",
+        source_field_label="payload.content",
+        output_field_labels="payload.downstream_summary",
+    )
     return f"""【角色设定】
 你是一名章节大纲摘要返工编辑。
 
@@ -211,6 +219,9 @@ def build_modification_prompt(action: str, payload: Dict[str, Any], message: str
 
 【已有问题】
 {expansion_error or feedback}
+
+【修改模式说明】
+{mode_instruction}
 
 【返工要求】
 1. 只修改 downstream_summary。
@@ -243,9 +254,10 @@ def build_modification_prompt(action: str, payload: Dict[str, Any], message: str
 """
 
 
-def generate_content_modification(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str] = None, feedback: str = "", expansion_error: str = "") -> Dict[str, Any]:
+def generate_content_modification(action: str, payload: Dict[str, Any], message: str, *, revision_mode: Optional[str] = None, feedback: str = "", expansion_error: str = "", llm_agent_name: Optional[str] = None) -> Dict[str, Any]:
     prompt = build_modification_prompt(action, payload or {}, message, revision_mode=revision_mode, feedback=feedback, expansion_error=expansion_error)
-    raw_content, llm_call = _invoke_llm(prompt, llm_agent_name=MODIFY_CONTENT_AGENT_NAME)
+    agent_name = llm_agent_name or MODIFY_CONTENT_AGENT_NAME
+    raw_content, llm_call = _invoke_llm(prompt, llm_agent_name=agent_name)
     parsed = parse_json_safely(raw_content)
     if not isinstance(parsed, dict):
         raise ValueError(f"{AGENT_NAME} modification returned non-object JSON: {raw_content[:500]}")
@@ -255,7 +267,7 @@ def generate_content_modification(action: str, payload: Dict[str, Any], message:
     summarized_payload["content"] = payload.get("content", "") or payload.get("summary", "")
     if payload.get("name"):
         summarized_payload["name"] = payload["name"]
-    return {"payload": summarized_payload, "llm_invoked": True, "agent_name": MODIFY_CONTENT_AGENT_NAME, "llm_agent_name": MODIFY_CONTENT_AGENT_NAME, "llm_call": llm_call, "raw_response": raw_content, "parsed_response": parsed, "modification_notes": parsed.get("modification_notes", ""), "change_summary": parsed.get("change_summary", "")}
+    return {"payload": summarized_payload, "llm_invoked": True, "agent_name": agent_name, "llm_agent_name": agent_name, "llm_call": llm_call, "raw_response": raw_content, "parsed_response": parsed, "modification_notes": parsed.get("modification_notes", ""), "change_summary": parsed.get("change_summary", "")}
 
 
 def input_node(state: ChapterOutlineSummaryCreateState) -> ChapterOutlineSummaryCreateState:
@@ -286,11 +298,15 @@ def review_node(state: ChapterOutlineSummaryCreateState) -> ChapterOutlineSummar
 
 def modify_content_node(state: ChapterOutlineSummaryCreateState) -> ChapterOutlineSummaryCreateState:
     payload = dict(state.get("pending_payload") or state.get("payload") or {})
-    feedback = state.get("review_feedback") or state.get("feedback", "")
-    modification = generate_content_modification(state.get("action", "create"), payload, state.get("message", ""), revision_mode=state.get("revision_mode"), feedback=feedback, expansion_error=feedback)
+    manual_edit = bool(state.get("manual_edit"))
+    user_feedback = str(state.get("feedback") or "")
+    review_feedback = str(state.get("review_feedback") or "")
+    feedback = user_feedback if manual_edit and user_feedback else review_feedback or user_feedback
+    llm_agent_name = HUMAN_FEEDBACK_AGENT_NAME if manual_edit else MODIFY_CONTENT_AGENT_NAME
+    modification = generate_content_modification(state.get("action", "create"), payload, state.get("message", ""), revision_mode=state.get("revision_mode"), feedback=feedback, expansion_error=feedback, llm_agent_name=llm_agent_name)
     nodes = list(state.get("nodes") or [])
     iteration = int(state.get("iterations") or 0) + 1
-    nodes.append(_node("modify_content", "completed", {"payload": payload, "feedback": feedback, "revision_mode": state.get("revision_mode")}, {**modification, "iteration": iteration}))
+    nodes.append(_node("modify_content", "completed", {"payload": payload, "feedback": feedback, "revision_mode": state.get("revision_mode"), "manual_edit": manual_edit}, {**modification, "iteration": iteration}))
     return {"pending_payload": modification["payload"], "nodes": nodes, "iterations": iteration, "current_node": "review", "status": "reviewing"}
 
 

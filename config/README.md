@@ -12,3 +12,8 @@ The application loads YAML modules from this directory and merges them into the 
 
 Environment variables still override YAML values at runtime.
 
+## Frontend
+
+- Primary UI: `frontend/` (React). Start with `make start`.
+- Legacy NiceGUI `ui/` is deprecated; see [docs/frontend_strategy.md](../docs/frontend_strategy.md).
+

@@ -56,22 +56,26 @@ docker-compose up -d
 
 ### 4. Start System Services
 
-To ensure permissions are handled correctly, it is recommended to start the backend and frontend separately using the system's pre-installed Python environment.
+**Recommended (React primary UI + API):**
 
-**Start the Backend API Service:**
 ```bash
-/usr/bin/python3 src/app_api.py
+make install   # first time: venv + Python/npm deps
+make start     # API http://127.0.0.1:5006 + React http://127.0.0.1:5174
 ```
-*   **Role**: Provides underlying Agent logic, database management, and hierarchical RAG retrieval interfaces.
-*   **URL**: `http://localhost:5006`
 
-**Start the Frontend UI:**
-Open a new terminal window:
+| Service | Port | Role |
+|---------|------|------|
+| Flask API | `5006` | Agents, DB, hierarchical RAG |
+| React UI | `5174` | **Primary UI**: world hierarchy, novels, agent workflows |
+
+Manual split terminals:
+
 ```bash
-/usr/bin/python3 ui/main.py
+env PYTHONPATH=.:src .venv/bin/python src/app_api.py
+cd frontend && npm run dev
 ```
-*   **Role**: Provides the visual multi-novel creative workspace, outline editor, and lore browser.
-*   **URL**: `http://localhost:8501` (Opens automatically in browser)
+
+> **Legacy NiceGUI UI (deprecated):** `ui/` is frozen. Optional: `make install-legacy` then `make start-legacy-ui` (`:8501`). See [docs/frontend_strategy.md](./docs/frontend_strategy.md).
 
 ---
 

@@ -16,6 +16,23 @@ def test_real_agent_worldview_flow_requests():
         assert run["review_required"] is True, run
         assert any(node["node_id"] == "world_rule_review" for node in run["nodes"]), run
         assert any(node["node_id"] == "worldview_consistency_review" for node in run["nodes"]), run
+        initial_expansion = next(node for node in run["nodes"] if node["node_id"] == "initial_expansion")
+        world_rule_review = next(node for node in run["nodes"] if node["node_id"] == "world_rule_review")
+        worldview_consistency_review = next(node for node in run["nodes"] if node["node_id"] == "worldview_consistency_review")
+        assert initial_expansion["output"]["llm_call"]["llm_agent_name"] == "worldview_agent_initial_expansion", initial_expansion
+        assert world_rule_review["output"]["llm_call"]["llm_agent_name"] == "worldview_world_rules_review_agent", world_rule_review
+        assert worldview_consistency_review["output"]["llm_call"]["llm_agent_name"] == "worldview_consistency_review_agent", worldview_consistency_review
+        assert len(
+            {
+                initial_expansion["output"]["llm_call"]["llm_agent_name"],
+                world_rule_review["output"]["llm_call"]["llm_agent_name"],
+                worldview_consistency_review["output"]["llm_call"]["llm_agent_name"],
+            }
+        ) == 3, {
+            "initial_expansion": initial_expansion,
+            "world_rule_review": world_rule_review,
+            "worldview_consistency_review": worldview_consistency_review,
+        }
         approved = approve_agent(run["run_id"])
         entry_id = approved["commit_result"]["id"]
         queried = next(
@@ -61,7 +78,7 @@ def test_real_agent_worldview_modify_content_uses_distinct_llm_identity():
         )["run"]
         modify_content = next(node for node in modified["nodes"] if node["node_id"] == "modify_content")
 
-        assert modify_content["output"]["llm_call"]["llm_agent_name"] == "worldview_agent_modify_content", modify_content
+        assert modify_content["output"]["llm_call"]["llm_agent_name"] == "worldview_agent_human_feedback_modify_content", modify_content
         assert initial_expansion["output"]["llm_call"]["llm_agent_name"] != modify_content["output"]["llm_call"]["llm_agent_name"], {
             "initial_expansion": initial_expansion,
             "modify_content": modify_content,

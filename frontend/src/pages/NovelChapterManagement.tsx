@@ -7,7 +7,6 @@ import {
   Button,
   Group,
   Loader,
-  Modal,
   Pagination,
   Paper,
   ScrollArea,
@@ -30,6 +29,7 @@ import {
   IconTrash,
 } from '@tabler/icons-react';
 import { api, getApiErrorMessage, isApiNotFoundError } from '../api/client';
+import { AppModal } from '../components/AppModal';
 import { getWorldviewDisplayName } from '../utils/worldview';
 
 type Novel = {
@@ -67,6 +67,7 @@ type Chapter = {
   novel_id?: string;
   worldview_id?: string;
   world_id?: string;
+  template_id?: string;
   updated_at?: string;
   created_at?: string;
 };
@@ -101,7 +102,17 @@ export const NovelChapterManagement: React.FC = () => {
   const [editChapterOutlineId, setEditChapterOutlineId] = useState('');
   const [editChapterWorldviewId, setEditChapterWorldviewId] = useState('');
   const [deleteChapter, setDeleteChapter] = useState<Chapter | null>(null);
+  const [viewChapterOpen, setViewChapterOpen] = useState(false);
   const [viewChapter, setViewChapter] = useState<Chapter | null>(null);
+
+  const closeViewChapter = () => {
+    setViewChapterOpen(false);
+  };
+
+  const openViewChapter = (chapter: Chapter) => {
+    setViewChapter(chapter);
+    setViewChapterOpen(true);
+  };
 
   const chapterRecordId = useCallback(
     (chapter: Chapter) => chapter.id || chapter.scene_id || chapter.prose_id || '',
@@ -199,14 +210,14 @@ export const NovelChapterManagement: React.FC = () => {
     const chapterId = chapter.id || chapter.scene_id || chapter.prose_id || '';
     const outlineId = chapter.outline_id || selectedOutlineId;
     const outline = outlines.find((item) => item.outline_id === outlineId);
+    // NOTE: Do NOT pass `content` or `name` in the URL — HierarchyWorkflow loads them
+    // from the API using the chapter `id`, avoiding URL-length truncation for long text.
     const params = new URLSearchParams({
       action: 'update',
       world_id: chapter.world_id || novel.world_id,
       novel_id: novel.novel_id,
       outline_id: outlineId,
       id: chapterId,
-      name: chapter.name || chapter.title || '',
-      content: chapter.content || '',
     });
     if (chapter.worldview_id || outline?.worldview_id) {
       params.set('worldview_id', chapter.worldview_id || outline?.worldview_id || '');
@@ -515,7 +526,7 @@ export const NovelChapterManagement: React.FC = () => {
                     <Table.Td><Text size="xs" c="dimmed">{chapter.updated_at || chapter.created_at || ''}</Text></Table.Td>
                     <Table.Td>
                       <Group gap="xs" wrap="nowrap">
-                        <Button size="xs" variant="light" leftSection={<IconEye size={14} />} onClick={() => setViewChapter(chapter)}>查看</Button>
+                        <Button size="xs" variant="light" leftSection={<IconEye size={14} />} onClick={() => openViewChapter(chapter)}>查看</Button>
                         <Button size="xs" variant="light" leftSection={<IconFileText size={14} />} onClick={() => openChapterContentManagement(chapter)}>查看章节内容</Button>
                         <Button size="xs" variant="light" leftSection={<IconCircleCheck size={14} />} onClick={() => openCheckWorkflow(chapter)}>检查内容</Button>
                         <Button size="xs" variant="light" leftSection={<IconEdit size={14} />} onClick={() => openEditChapterModal(chapter)}>直接修改</Button>
@@ -538,7 +549,13 @@ export const NovelChapterManagement: React.FC = () => {
         </ScrollArea>
       </Paper>
 
-      <Modal opened={Boolean(viewChapter)} onClose={() => setViewChapter(null)} title="查看分卷章节大纲" size="lg">
+      <AppModal
+        opened={viewChapterOpen}
+        onClose={closeViewChapter}
+        onExitTransitionEnd={() => setViewChapter(null)}
+        title="查看分卷章节大纲"
+        size="lg"
+      >
         <Stack gap="sm">
           <Text fw={700}>{viewChapter?.name || viewChapter?.title}</Text>
           <Text size="xs" c="dimmed">章节大纲 ID：{viewChapter?.id || viewChapter?.scene_id || viewChapter?.prose_id}</Text>
@@ -547,14 +564,14 @@ export const NovelChapterManagement: React.FC = () => {
             <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>{viewChapter?.content || '暂无内容。'}</Text>
           </Paper>
           <Group justify="flex-end">
-            <Button variant="light" onClick={() => setViewChapter(null)}>关闭</Button>
-            <Button variant="light" onClick={() => { if (viewChapter) { setViewChapter(null); openEditChapterModal(viewChapter); } }}>直接修改</Button>
-            <Button onClick={() => { if (viewChapter) { setViewChapter(null); openUpdateWorkflow(viewChapter); } }}>工作流修改分卷章节大纲</Button>
+            <Button variant="light" onClick={closeViewChapter}>关闭</Button>
+            <Button variant="light" onClick={() => { if (viewChapter) { closeViewChapter(); openEditChapterModal(viewChapter); } }}>直接修改</Button>
+            <Button onClick={() => { if (viewChapter) { closeViewChapter(); openUpdateWorkflow(viewChapter); } }}>工作流修改分卷章节大纲</Button>
           </Group>
         </Stack>
-      </Modal>
+      </AppModal>
 
-      <Modal opened={Boolean(deleteChapter)} onClose={() => setDeleteChapter(null)} title="删除分卷章节大纲" size="md">
+      <AppModal opened={Boolean(deleteChapter)} onClose={() => setDeleteChapter(null)} title="删除分卷章节大纲" size="md">
         <Stack gap="sm">
           <Alert color="red">删除会移除该分卷章节大纲记录。</Alert>
           <Text fw={700}>{deleteChapter?.name || deleteChapter?.title}</Text>
@@ -564,9 +581,9 @@ export const NovelChapterManagement: React.FC = () => {
             <Button color="red" loading={saving} onClick={confirmDelete}>确认删除</Button>
           </Group>
         </Stack>
-      </Modal>
+      </AppModal>
 
-      <Modal opened={createChapterOpened} onClose={() => setCreateChapterOpened(false)} title="直接新增分卷章节大纲" size="lg">
+      <AppModal opened={createChapterOpened} onClose={() => setCreateChapterOpened(false)} title="直接新增分卷章节大纲" size="lg">
         <Stack gap="sm">
           <Alert color="blue">这个入口直接写入 `prose`，不走工作流；适合直接录入分卷章节大纲全文。</Alert>
           <TextInput
@@ -603,9 +620,9 @@ export const NovelChapterManagement: React.FC = () => {
             <Button loading={saving} onClick={confirmCreateChapter}>直接创建</Button>
           </Group>
         </Stack>
-      </Modal>
+      </AppModal>
 
-      <Modal opened={editChapterOpened} onClose={() => setEditChapterOpened(false)} title="直接修改分卷章节大纲" size="lg">
+      <AppModal opened={editChapterOpened} onClose={() => setEditChapterOpened(false)} title="直接修改分卷章节大纲" size="lg">
         <Stack gap="sm">
           <Alert color="blue">这个入口直接写入 `prose`，不走工作流；保存后会立刻回查数据库结果。</Alert>
           <Text size="xs" c="dimmed">章节 ID：{editingChapter?.id || editingChapter?.scene_id || editingChapter?.prose_id || ''}</Text>
@@ -643,7 +660,7 @@ export const NovelChapterManagement: React.FC = () => {
             <Button loading={saving} onClick={confirmUpdateChapter}>直接保存</Button>
           </Group>
         </Stack>
-      </Modal>
+      </AppModal>
     </Stack>
   );
 };

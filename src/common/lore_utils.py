@@ -829,10 +829,14 @@ def get_unified_context(query, outline_id="default", worldview_id="default_wv", 
     context_blocks = []
     db = get_mongodb_db()
     if db is not None:
-        # 简单文本匹配
-        cursor = db["lore"].find({"name": {"$regex": query, "$options": "i"}}).limit(3)
-        for doc in cursor:
-            context_blocks.append(f"【权威设定: {doc['name']}】\n{doc['content']}")
+        # 简单文本匹配 - 对 query 做正则转义，防止章节内容中的特殊字符引发 MongoDB $regex 错误
+        safe_query = re.escape(query.strip()[:200])  # 截断并转义，避免过长 query 导致性能问题
+        try:
+            cursor = db["lore"].find({"name": {"$regex": safe_query, "$options": "i"}}).limit(3)
+            for doc in cursor:
+                context_blocks.append(f"【权威设定: {doc['name']}】\n{doc['content']}")
+        except Exception:
+            pass  # MongoDB regex 仍失败则跳过，不阻塞后续检索
     else:
         raise ConnectionError("MongoDB is not available for context retrieval.")
 
@@ -865,7 +869,7 @@ def get_grounded_context(query, outline_id: Optional[str] = None, worldview_id: 
     db = get_mongodb_db()
     if db is not None:
         try:
-            mongo_query: Dict[str, Any] = {"name": {"$regex": query, "$options": "i"}}
+            mongo_query: Dict[str, Any] = {"name": {"$regex": re.escape(query.strip()[:200]), "$options": "i"}}
             if worldview_id:
                 mongo_query["worldview_id"] = worldview_id
             if outline_id:

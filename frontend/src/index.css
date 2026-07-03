@@ -7,7 +7,12 @@ body {
   -moz-osx-font-smoothing: grayscale;
   background: radial-gradient(circle at top right, #0a0a1f, #05050a);
   color: #ffffff;
-  overflow: hidden;
+  min-height: 100vh;
+}
+
+html,
+#root {
+  min-height: 100vh;
 }
 
 /* Glassmorphism Utility */

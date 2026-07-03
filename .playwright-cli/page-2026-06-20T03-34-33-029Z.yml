@@ -1,0 +1,221 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - button "open drawer" [ref=e6] [cursor=pointer]:
+        - img [ref=e7]
+      - generic [ref=e9]: 万象星际 Novel Agent
+  - list [ref=e14]:
+    - listitem [ref=e15]:
+      - button "世界层级" [ref=e16] [cursor=pointer]:
+        - img [ref=e18]
+        - generic [ref=e21]: 世界层级
+    - listitem [ref=e22]:
+      - button "世界观设定" [ref=e23] [cursor=pointer]:
+        - img [ref=e25]
+        - generic [ref=e28]: 世界观设定
+    - listitem [ref=e29]:
+      - button "星际图谱" [ref=e30] [cursor=pointer]:
+        - img [ref=e32]
+        - generic [ref=e35]: 星际图谱
+    - listitem [ref=e36]:
+      - button "设定知识库" [ref=e37] [cursor=pointer]:
+        - img [ref=e39]
+        - generic [ref=e42]: 设定知识库
+    - listitem [ref=e43]:
+      - button "小说项目管理" [ref=e44] [cursor=pointer]:
+        - img [ref=e46]
+        - generic [ref=e49]: 小说项目管理
+    - listitem [ref=e50]:
+      - button "用户信息" [ref=e51] [cursor=pointer]:
+        - img [ref=e53]
+        - generic [ref=e56]: 用户信息
+    - listitem [ref=e57]:
+      - button "登录/注册" [ref=e58] [cursor=pointer]:
+        - img [ref=e60]
+        - generic [ref=e63]: 登录/注册
+  - main [ref=e64]:
+    - generic [ref=e66]:
+      - generic [ref=e67]:
+        - generic [ref=e68]:
+          - button "返回" [ref=e69] [cursor=pointer]:
+            - img [ref=e71]
+          - generic [ref=e74]:
+            - heading "新增章节简介与总结工作流" [level=2] [ref=e75]
+            - paragraph [ref=e76]: 新增章节简介与总结专属 Dify-like 节点流与对话框；所有节点输入输出来自真实 hierarchy_agent_runs。
+        - generic [ref=e77]:
+          - generic [ref=e79]: chapter_intro_summary_create
+          - generic [ref=e81]: create
+          - button "刷新" [ref=e83] [cursor=pointer]:
+            - generic [ref=e84]:
+              - img [ref=e86]
+              - generic [ref=e89]: 刷新
+      - generic [ref=e91]:
+        - heading "新增表单" [level=4] [ref=e93]
+        - generic [ref=e94]:
+          - generic [ref=e96]:
+            - generic [ref=e98]:
+              - generic [ref=e99]: 世界
+              - generic [ref=e100]:
+                - textbox "世界" [ref=e101]
+                - generic:
+                  - img
+            - generic [ref=e103]:
+              - generic [ref=e104]: 世界观
+              - generic [ref=e105]:
+                - textbox "世界观" [ref=e106]
+                - generic:
+                  - img
+            - generic [ref=e108]:
+              - generic [ref=e109]: 大纲
+              - generic [ref=e110]:
+                - textbox "大纲" [ref=e111]
+                - generic:
+                  - img
+            - generic [ref=e113]:
+              - generic [ref=e114]: 名称
+              - textbox "名称" [ref=e116]: 序幕：星海尽头
+          - generic [ref=e117]:
+            - generic [ref=e118]:
+              - generic [ref=e119]: 章节原文
+              - textbox "章节原文" [ref=e121]: 星海历第七纪元3842年。 第七殖民星域。 苍穹星航道。 天际号缓缓脱离轨道空间站。 巨大的舰体在恒星光芒照射下泛着银白色光辉。 这是一艘标准大型民用运输舰。 长度超过三十公里。 拥有完整生态循环系统。 能够长期执行跨星系航行任务。 对于第七殖民星域的人来说。 天际号并不特殊。 它只是无数运输舰中的一艘。 如同城市间往返的列车。 日复一日。 年复一年。 运行在已经存在数百年的殖民航线上。 --- 船上的两万余名乘客来自不同世界。 不同阶层。 不同身份。 却拥有同一个目的地。 苍穹星。 第七殖民星域的行政中心。 商业中心。 教育中心。 也是无数殖民地居民眼中的文明中心。 --- 有人准备在那里开始新的工作。 有人准备进入更高等级的学校。 有人准备拓展生意。 有人准备与家人团聚。 还有人只是单纯结束了一段漫长旅程。 --- 对于绝大多数人来说。 这只是人生中一次普通出行。 没有人会记住这一天。 就像没有人会记住自己乘坐过的每一次交通工具。 --- 观景大厅里。 孩子们追逐打闹。 老人们悠闲聊天。 情侣依偎在观景窗前。 商人讨论市场行情。 旅客浏览着最新新闻。 服务机器人穿梭在人群之间。 整个大厅充满轻松而愉快的气氛。 --- 星创帝国依然强盛。 航道依然安全。 贸易依然繁荣。 战争距离这里十分遥远。 混乱属于边疆。 危险属于法外之地。 而这里属于文明。 属于秩序。 属于被无数人视为理所当然的未来。 --- 主角站在观景窗前。 看着外面的群星。 他的父母就在不远处。 一家人正在讨论抵达苍穹星之后的安排。 或许会先找一家餐厅。 或许会去新的居住区。 或许会开始新的生活。 这只是一次普通家庭之间再普通不过的谈话。 没有人会把这些话记在心里。 --- 因为谁也不会想到。 这将是他们最后一次以帝国公民的身份讨论未来。 --- 与此同时。 在天际号深层导航系统中。 一道极其微弱的数据波动一闪而过。 持续时间不足零点一秒。 随后消失。 系统没有报警。 工作人员没有发现。 乘客更不会知道。 --- 天际号继续向前。 驶离空间站。 驶向苍穹星。 也驶向所有人都无法预料的命运。 此时此刻。 船上的两万余人依然相信。 自己生活在一个稳定而永恒的文明之中。 他们不知道。 几个小时后。 天际号将从星创帝国的航道记录中彻底消失。 成为第七殖民星域历史上最著名的失踪事件之一。 而对于船上的人来说。 真正的旅程。 才刚刚开始。
+            - generic [ref=e123]:
+              - generic [ref=e125]:
+                - generic [ref=e126]: 章节简介
+                - paragraph [ref=e127]: 这里直接显示当前 run 已生成的章节简介。
+                - textbox "章节简介" [disabled] [ref=e129]
+              - generic [ref=e131]:
+                - generic [ref=e132]: 章节总结
+                - paragraph [ref=e133]: 这里直接显示当前 run 已生成的章节总结。
+                - textbox "章节总结" [disabled] [ref=e135]
+          - generic [ref=e136]:
+            - generic [ref=e137]: 给 Agent 的消息
+            - textbox "给 Agent 的消息" [ref=e139]: 生成章节简介与总结
+        - button "启动工作流" [ref=e141] [cursor=pointer]:
+          - generic [ref=e142]:
+            - img [ref=e144]
+            - generic [ref=e146]: 启动工作流
+      - generic [ref=e148]:
+        - generic [ref=e149]:
+          - heading "工作流与节点信息" [level=4] [ref=e150]
+          - generic [ref=e151]:
+            - generic [ref=e153]: 当前节点：apply
+            - generic [ref=e155]: 未写库
+        - generic [ref=e157]:
+          - generic [ref=e158]:
+            - application [ref=e160]:
+              - generic [ref=e162]:
+                - generic:
+                  - generic:
+                    - img
+                    - img:
+                      - group "Edge from input__1 to draft__1" [ref=e163] [cursor=pointer]
+                    - img:
+                      - group "Edge from draft__1 to review__1" [ref=e166] [cursor=pointer]
+                    - img:
+                      - group "Edge from review__1 to human__1" [ref=e169] [cursor=pointer]
+                    - img:
+                      - group "Edge from human__1 to apply__1" [ref=e172] [cursor=pointer]
+                  - generic:
+                    - group [ref=e175]: 步骤 1：接收输入 接收用户消息与业务 payload pending
+                    - group [ref=e178]: 步骤 2：LLM 生成草案 调用对应业务 Agent 的 LLM pending
+                    - group [ref=e181]: 步骤 3：业务审查 校验草案是否满足层级约束 pending
+                    - group [ref=e184]: 步骤 4：人工确认 等待用户批准、修改或中止 pending
+                    - group [ref=e187]: 步骤 5：真实写库 执行数据库写入 pending
+              - img
+              - generic "Control Panel" [ref=e190]:
+                - button "Zoom In" [ref=e191] [cursor=pointer]:
+                  - img [ref=e192]
+                - button "Zoom Out" [disabled]:
+                  - img
+                - button "Fit View" [ref=e194] [cursor=pointer]:
+                  - img [ref=e195]
+                - button "Toggle Interactivity" [ref=e197] [cursor=pointer]:
+                  - img [ref=e198]
+              - link "React Flow attribution" [ref=e201] [cursor=pointer]:
+                - /url: https://reactflow.dev
+                - text: React Flow
+            - generic [ref=e204]:
+              - generic [ref=e206]:
+                - generic [ref=e207]:
+                  - paragraph [ref=e208]: 当前节点
+                  - generic [ref=e210]: apply
+                - paragraph [ref=e211]: 迭代轮次：0
+                - paragraph [ref=e212]: run_id：尚未启动
+              - generic [ref=e214]:
+                - generic [ref=e215]:
+                  - paragraph [ref=e216]: 写库结果
+                  - generic [ref=e218]: 未写库
+                - paragraph [ref=e219]: 人工批准前不会写库。
+          - generic [ref=e222]:
+            - tablist [ref=e223]:
+              - tab "步骤" [selected] [ref=e224] [cursor=pointer]:
+                - generic [ref=e225]: 步骤
+              - tab "对话" [ref=e226] [cursor=pointer]:
+                - generic [ref=e227]: 对话
+              - tab "节点" [ref=e228] [cursor=pointer]:
+                - generic [ref=e229]: 节点
+              - tab "Run" [ref=e230] [cursor=pointer]:
+                - generic [ref=e231]: Run
+            - tabpanel "步骤" [ref=e232]:
+              - generic [ref=e236]:
+                - generic [ref=e237]:
+                  - generic [ref=e238]:
+                    - generic [ref=e239]:
+                      - paragraph [ref=e240]: 步骤 1：接收输入
+                      - paragraph [ref=e241]: 接收用户消息与业务 payload
+                    - generic [ref=e243]: pending
+                  - paragraph [ref=e244]: 记录本次要新增或修改的实体、父级关系和人工意图，作为后续 Agent 草案生成的唯一输入基准。
+                - generic [ref=e245]:
+                  - generic [ref=e246]:
+                    - generic [ref=e247]:
+                      - paragraph [ref=e248]: 步骤 2：LLM 生成草案
+                      - paragraph [ref=e249]: 调用对应业务 Agent 的 LLM
+                    - generic [ref=e251]: pending
+                  - paragraph [ref=e252]: 根据实体类型调用对应 Agent，扩充 summary/content 并保留关键 ID。
+                - generic [ref=e253]:
+                  - generic [ref=e254]:
+                    - generic [ref=e255]:
+                      - paragraph [ref=e256]: 步骤 3：业务审查
+                      - paragraph [ref=e257]: 校验草案是否满足层级约束
+                    - generic [ref=e259]: pending
+                  - paragraph [ref=e260]: 检查必填字段、父级实体、章节归属和跨模块规则；世界模块跳过该步骤。
+                - generic [ref=e261]:
+                  - generic [ref=e262]:
+                    - generic [ref=e263]:
+                      - paragraph [ref=e264]: 步骤 4：人工确认
+                      - paragraph [ref=e265]: 等待用户批准、修改或中止
+                    - generic [ref=e267]: pending
+                  - paragraph [ref=e268]: 草案在这里暂停，不会写入数据库；用户可批准写库或触发下一轮 LLM 迭代。
+                - generic [ref=e269]:
+                  - generic [ref=e270]:
+                    - generic [ref=e271]:
+                      - paragraph [ref=e272]: 步骤 5：真实写库
+                      - paragraph [ref=e273]: 执行数据库写入
+                    - generic [ref=e275]: pending
+                  - paragraph [ref=e276]: 仅在人工批准后创建或更新世界、世界观、小说、大纲或章节，并返回真实写库结果。
+      - generic [ref=e278]:
+        - heading "用户处理" [level=4] [ref=e279]
+        - generic [ref=e280]:
+          - generic [ref=e281]: 对话反馈/修改意见
+          - textbox "对话反馈/修改意见" [ref=e283]
+        - generic [ref=e284]:
+          - generic [ref=e286]:
+            - generic [ref=e287]: 修改模式
+            - generic [ref=e288]:
+              - textbox "修改模式" [ref=e289] [cursor=pointer]: 摘要重做
+              - generic:
+                - img
+          - generic [ref=e290]:
+            - button "提交修改" [disabled] [ref=e291]:
+              - generic [ref=e292]:
+                - img [ref=e294]
+                - generic [ref=e298]: 提交修改
+            - button "批准写库" [disabled] [ref=e299]:
+              - generic [ref=e300]:
+                - img [ref=e302]
+                - generic [ref=e305]: 批准写库
+            - button "中止" [disabled] [ref=e306]:
+              - generic [ref=e308]: 中止
+      - generic [ref=e310]:
+        - img [ref=e311]
+        - paragraph [ref=e314]: "该页面是 新增章节简介与总结 的独立工作流页。启动后节点、对话、审查和写库结果全部来自真实 `/api/hierarchy-agent/*` 接口。"

@@ -55,6 +55,7 @@
 
 ### 6. 万象仪表盘 (Omni-Dashboard)
 
+-   **主前端（React）**：`frontend/`，默认 `http://127.0.0.1:5174`，由 `make start` 拉起。
 -   **可视化工作流**：直观展示 Agent 的思考与执行过程。
 -   **人机协同**：支持在关键节点拦截任务，支持针对大纲或目录进行交互式增量修改。
 -   **文献档案库**：统一检索存储在 MongoDB 与 ChromaDB 中的历史设定。
@@ -127,22 +128,29 @@ docker-compose up -d
 
 ### 4. 启动系统服务
 
-由于涉及到多进程和可能的系统权限问题，建议使用您的系统 Python 预装环境启动。请分别在两个终端中运行后端与前端服务：
+**推荐方式（React 主前端 + API）：**
 
-**启动后端 API 服务：**
 ```bash
-/usr/bin/python3 src/app_api.py
+make install   # 首次：创建 .venv 并安装 Python + npm 依赖
+make start     # API http://127.0.0.1:5006 + React http://127.0.0.1:5174
 ```
-*   **职责**: 提供底层 Agent 逻辑、数据库管理和层级化 RAG 检索接口。
-*   **服务地址**: `http://localhost:5006`
 
-**启动前端 UI 界面：**
-打开一个新的终端窗口：
+| 服务 | 端口 | 说明 |
+|------|------|------|
+| Flask API | `5006` | Agent 逻辑、数据库、层级 RAG |
+| React 前端 | `5174` | **主 UI**：世界层级、小说管理、Agent 工作流 |
+
+也可手动分终端启动：
+
 ```bash
-/usr/bin/python3 ui/main.py
+# 终端 1 — 后端
+env PYTHONPATH=.:src .venv/bin/python src/app_api.py
+
+# 终端 2 — React 前端
+cd frontend && npm run dev
 ```
-*   **职责**: 提供直观的多小说并行创作工作室、大纲编辑器及设定浏览器。
-*   **服务地址**: `http://localhost:8501` (启动后会自动在浏览器中弹启)
+
+> **NiceGUI 遗留 UI（已废弃）**：`ui/` 不再接受新功能。若仍需兼容旧环境，执行 `make install-legacy` 后 `make start-legacy-ui`（`:8501`）。详见 [docs/frontend_strategy.md](./docs/frontend_strategy.md)。
 
 
 ---

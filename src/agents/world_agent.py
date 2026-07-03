@@ -15,6 +15,7 @@ from langgraph.types import interrupt
 
 from src.common.config_utils import get_config
 from src.common.lore_utils import get_langfuse_callback, get_llm, get_mongodb_db, get_unified_context, parse_json_safely
+from src.common.revision_mode_prompt import build_revision_mode_instruction
 
 
 def _now() -> str:
@@ -22,6 +23,8 @@ def _now() -> str:
 
 
 AGENT_NAME = "world_agent"
+INITIAL_EXPANSION_AGENT_NAME = "world_agent_initial_expansion"
+MODIFY_CONTENT_AGENT_NAME = "world_agent_modify_content"
 ENTITY_TYPE = "world"
 PRIMARY_FIELD = "summary"
 WORKFLOW_DESCRIPTION = "世界 Agent 流程：接收世界输入 -> 初始扩充世界内容 -> 等待人工确认 -> 批准后写入 worlds；人工不同意则进入修改内容节点，再回到人工确认。世界模块不包含审查节点，但必须维护世界禁止规则与基本设定。"
@@ -115,18 +118,20 @@ def _extract_llm_content(response: Any) -> str:
     return str(content or "")
 
 
-def _llm_metadata(raw_content: str, prompt: str) -> Dict[str, Any]:
+def _llm_metadata(raw_content: str, prompt: str, llm_agent_name: str) -> Dict[str, Any]:
     """生成本次 world_agent LLM 调用的中文可审计元数据。"""
     config = get_config()
     provider = str(config.get("LLM_PROVIDER", "ollama")).lower()
-    agent_config = (config.get("AGENT_MODELS") or {}).get(AGENT_NAME) or {}
+    agent_config = (config.get("AGENT_MODELS") or {}).get(llm_agent_name) or {}
+    if not agent_config:
+        agent_config = (config.get("AGENT_MODELS") or {}).get(AGENT_NAME) or {}
     model_name = agent_config.get("model") if isinstance(agent_config, dict) else agent_config
     provider_config = (config.get("LLM_MODELS") or {}).get(provider) or {}
     if isinstance(provider_config, dict) and not model_name:
         model_name = provider_config.get("default")
     return {
         "llm_invoked": True,
-        "llm_agent_name": AGENT_NAME,
+        "llm_agent_name": llm_agent_name,
         "provider": provider,
         "model": model_name or config.get("DEFAULT_MODEL"),
         "json_mode": True,
@@ -136,9 +141,9 @@ def _llm_metadata(raw_content: str, prompt: str) -> Dict[str, Any]:
     }
 
 
-def _invoke_llm(prompt: str) -> tuple[str, Dict[str, Any]]:
+def _invoke_llm(prompt: str, *, llm_agent_name: str) -> tuple[str, Dict[str, Any]]:
     """真实调用 world_agent 对应 LLM；空响应直接报错，禁止伪成功。"""
-    llm = get_llm(json_mode=True, agent_name=AGENT_NAME)
+    llm = get_llm(json_mode=True, agent_name=llm_agent_name)
     config: Dict[str, Any] = {}
     callback = get_langfuse_callback()
     if callback:
@@ -146,8 +151,8 @@ def _invoke_llm(prompt: str) -> tuple[str, Dict[str, Any]]:
     response = llm.invoke(prompt, config=config if config else None)
     raw_content = _extract_llm_content(response)
     if not raw_content.strip():
-        raise ValueError(f"{AGENT_NAME} returned empty LLM response")
-    return raw_content, _llm_metadata(raw_content, prompt)
+        raise ValueError(f"{llm_agent_name} returned empty LLM response")
+    return raw_content, _llm_metadata(raw_content, prompt, llm_agent_name)
 
 
 def _node(node_id: str, status: str, node_input: Dict[str, Any], output: Dict[str, Any]) -> Dict[str, Any]:
@@ -244,7 +249,7 @@ def generate_initial_expansion(
 ) -> Dict[str, Any]:
     """调用 LLM 生成世界初始扩充结果，确保第二节点真实使用 world_agent LLM。"""
     prompt = build_initial_expansion_prompt(action, payload or {}, message, revision_mode=revision_mode, feedback=feedback)
-    raw_content, llm_call = _invoke_llm(prompt)
+    raw_content, llm_call = _invoke_llm(prompt, llm_agent_name=INITIAL_EXPANSION_AGENT_NAME)
     parsed = parse_json_safely(raw_content)
     if not isinstance(parsed, dict):
         raise ValueError(f"{AGENT_NAME} initial expansion returned non-object JSON: {raw_content[:500]}")
@@ -263,8 +268,8 @@ def generate_initial_expansion(
         "payload": initial_payload,
         "expanded_input": expanded_input,
         "llm_invoked": True,
-        "agent_name": AGENT_NAME,
-        "llm_agent_name": AGENT_NAME,
+        "agent_name": INITIAL_EXPANSION_AGENT_NAME,
+        "llm_agent_name": INITIAL_EXPANSION_AGENT_NAME,
         "llm_call": llm_call,
         "raw_response": raw_content,
         "parsed_response": parsed,
@@ -286,12 +291,19 @@ def build_modification_prompt(
         f"{message}\n{payload.get('name', '')}\n{payload.get('summary', '')}",
         worldview_id=str(world_id),
     )
+    mode_instruction = build_revision_mode_instruction(
+        revision_mode,
+        entity_label="世界根实体",
+        primary_field_label="payload.summary",
+        content_rewrite_scope="允许围绕世界摘要 summary 做较大幅重写，但 forbidden_rules 与 basic_settings 只可做保持一致性所必需的最小联动。",
+        full_rewrite_scope="允许整体重写 name、summary、forbidden_rules 和 basic_settings 等世界级业务内容。",
+    )
     return f"""【角色设定】
 你是一名世界根设定编辑。你的唯一职责是修正“世界（World）”根实体，不得越权生成世界观、小说、大纲或章节内容。
 
 【操作流程 (Mandatory Workflow)】
 1. 审查（Review）：检查当前世界内容与人工反馈是否存在明确冲突，确认哪些字段必须调整、哪些字段必须保留。
-2. 修正（Modify）：根据【人工不同意原因/修改意见】和【修改模式】对世界内容做局部、精准修改，不得超范围改写。
+2. 修正（Modify）：根据【人工不同意原因/修改意见】和下面的【修改模式说明】修正世界内容。
 3. 扩展（Expand）：仅在完成修正后，补充必要细节，让世界根摘要、forbidden_rules 与 basic_settings 更完整，但不得偏离反馈要求。
 
 【输入信息】
@@ -304,6 +316,8 @@ def build_modification_prompt(
 {json.dumps(payload or {}, ensure_ascii=False, indent=2)}
 【检索上下文】
 {rag_context}
+【修改模式说明】
+{mode_instruction}
 
 【输出要求】
 1. 只返回合法 JSON，不得返回解释文字，不得写库。
@@ -342,10 +356,12 @@ def generate_content_modification(
     *,
     revision_mode: Optional[str] = None,
     feedback: str = "",
+    llm_agent_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """调用 LLM 根据人工反馈修改世界内容，并返回可再次确认的 payload。"""
     prompt = build_modification_prompt(action, payload or {}, message, revision_mode=revision_mode, feedback=feedback)
-    raw_content, llm_call = _invoke_llm(prompt)
+    agent_name = llm_agent_name or MODIFY_CONTENT_AGENT_NAME
+    raw_content, llm_call = _invoke_llm(prompt, llm_agent_name=agent_name)
     parsed = parse_json_safely(raw_content)
     if not isinstance(parsed, dict):
         raise ValueError(f"{AGENT_NAME} modification returned non-object JSON: {raw_content[:500]}")
@@ -360,8 +376,8 @@ def generate_content_modification(
     return {
         "payload": modified_payload,
         "llm_invoked": True,
-        "agent_name": AGENT_NAME,
-        "llm_agent_name": AGENT_NAME,
+        "agent_name": agent_name,
+        "llm_agent_name": agent_name,
         "llm_call": llm_call,
         "raw_response": raw_content,
         "parsed_response": parsed,

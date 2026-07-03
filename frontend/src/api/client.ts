@@ -194,6 +194,8 @@ export const api = {
       | 'outline_summary_update'
       | 'chapter_outline_summary_create'
       | 'chapter_outline_summary_update'
+      | 'chapter_intro_summary_create'
+      | 'chapter_intro_summary_update'
       | 'chapter_content_summary_create'
       | 'chapter_content_summary_update';
     action: 'create' | 'update' | 'check' | 'delete';
@@ -205,7 +207,7 @@ export const api = {
     run_id: string;
     decision: 'approve' | 'request_changes' | 'reject';
     message?: string;
-    revision_mode?: 'partial_rewrite' | 'full_rewrite' | 'content_rewrite';
+    revision_mode?: 'partial_rewrite' | 'full_rewrite' | 'content_rewrite' | 'summary_rewrite';
     manual_edit?: boolean;
     payload?: Record<string, unknown>;
   }) => apiClient.post('/api/hierarchy-agent/respond', data),
@@ -268,4 +270,16 @@ export const api = {
 
   getOutlineChapterState: (params: { world_id?: string; worldview_id?: string; outline_id?: string; page: number; page_size: number }) =>
     apiClient.get('/api/workflow/outline-chapter/state', { params }),
+
+  listChapterOutlineTemplates: (params: { novel_id: string; page: number; page_size: number }) =>
+    apiClient.get('/api/novels/chapter-outline-templates/list', { params }),
+
+  createChapterOutlineTemplate: (data: { novel_id: string; name: string; content: string }) =>
+    apiClient.post('/api/novels/chapter-outline-templates/create', data),
+
+  updateChapterOutlineTemplate: (data: { template_id: string; name?: string; content?: string }) =>
+    apiClient.post('/api/novels/chapter-outline-templates/update', data),
+
+  deleteChapterOutlineTemplate: (data: { template_id: string }) =>
+    apiClient.delete('/api/novels/chapter-outline-templates/delete', { data }),
 };

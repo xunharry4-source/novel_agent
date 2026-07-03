@@ -7,7 +7,6 @@ langchain
 langchain-openai
 langchain-google-genai
 langgraph
-nicegui
 httpx
 langchain-chroma
 google-generativeai

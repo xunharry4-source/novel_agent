@@ -10,6 +10,7 @@ import { NovelDetail } from './pages/NovelDetail';
 import { NovelOutlineManagement } from './pages/NovelOutlineManagement';
 import { NovelChapterManagement } from './pages/NovelChapterManagement';
 import { NovelChapterContentManagement } from './pages/NovelChapterContentManagement';
+import { ChapterOutlineTemplateManagement } from './pages/ChapterOutlineTemplateManagement';
 import { Login } from './pages/Login';
 import { UserProfile } from './pages/UserProfile';
 import { RequireAuth } from './components/RequireAuth';
@@ -21,12 +22,22 @@ import {
   WorldWorkflow,
   WorldviewWorkflow,
 } from './pages/HierarchyWorkflow';
-import { MantineProvider } from '@mantine/core';
+import { MantineProvider, createTheme } from '@mantine/core';
 import '@mantine/core/styles.css';
+
+const theme = createTheme({
+  components: {
+    Modal: {
+      defaultProps: {
+        lockScroll: false,
+      },
+    },
+  },
+});
 
 function App() {
   return (
-    <MantineProvider defaultColorScheme="dark">
+    <MantineProvider theme={theme} defaultColorScheme="dark">
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<MainLayout />}>
@@ -51,6 +62,7 @@ function App() {
             <Route path="novels/:novelId/outlines" element={<NovelOutlineManagement />} />
             <Route path="novels/:novelId/chapters" element={<NovelChapterManagement />} />
             <Route path="novels/:novelId/chapter-contents" element={<NovelChapterContentManagement />} />
+            <Route path="novels/:novelId/chapter-outline-templates" element={<ChapterOutlineTemplateManagement />} />
             <Route path="novels/:novelId" element={<NovelDetail />} />
             <Route path="workflow" element={<HierarchyWorkflow />} />
             <Route path="workflow/world" element={<WorldWorkflow />} />

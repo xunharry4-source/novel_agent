@@ -6,11 +6,13 @@ from __future__ import annotations
 
 from langchain_core.callbacks import BaseCallbackHandler
 from .config_utils import load_config
+from .llm_identity_registry import validate_llm_identity_registry
 from .logger_utils import get_logger
 from .usage_utils import update_agent_usage
 from langchain_openai import ChatOpenAI
 
 logger = get_logger("novel_agent.llm_factory")
+_LLM_IDENTITY_REGISTRY_VALIDATED = False
 
 
 def _parse_timeout(value, fallback: int) -> int:
@@ -39,7 +41,7 @@ def _provider_model_config(config: dict, provider: str) -> dict:
     if provider == "ollama":
         normalized["base_url"] = normalized.get("base_url") or config.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
     elif provider == "local":
-        normalized["base_url"] = normalized.get("base_url") or config.get("LOCAL_LLM_URL", "http://localhost:5000/v1")
+        normalized["base_url"] = normalized.get("base_url") or config.get("LOCAL_LLM_URL", "http://localhost:8317/v1")
     return normalized
 
 
@@ -100,7 +102,11 @@ def get_llm(json_mode: bool = False, agent_name: str = "unknown"):
     优先级: Agent 专属配置 > Provider 默认配置 > 系统全局默认
     """
     config = load_config()
-    provider = config.get("LLM_PROVIDER", "ollama").lower()
+    global _LLM_IDENTITY_REGISTRY_VALIDATED
+    if not _LLM_IDENTITY_REGISTRY_VALIDATED:
+        validate_llm_identity_registry(config.get("AGENT_MODELS", {}))
+        _LLM_IDENTITY_REGISTRY_VALIDATED = True
+    provider = config.get("LLM_PROVIDER", "local").lower()
 
     # 1. 尝试获取 Agent 专属配置 (支持字符串或字典)
     agent_models = config.get("AGENT_MODELS", {})
@@ -120,7 +126,7 @@ def get_llm(json_mode: bool = False, agent_name: str = "unknown"):
 
     # 3. 如果依然没有，使用系统全局默认
     if not model_name:
-        model_name = config.get("DEFAULT_MODEL", "gemma4:e2b")
+        model_name = config.get("DEFAULT_MODEL", "gemini-3-flash")
 
     logger.info(f"Instantiating LLM for agent '{agent_name}' using model '{model_name}' (Provider: {provider})")
 
@@ -165,10 +171,14 @@ def get_llm(json_mode: bool = False, agent_name: str = "unknown"):
 
     elif provider == "local":
         base_url = _provider_model_config(config, provider).get("base_url")
+        api_key = config.get("LOCAL_API_KEY")
+
+        if not api_key:
+            raise ValueError("LOCAL_API_KEY missing in .env, config/secrets.yml, or environment")
 
         return ChatOpenAI(
             model=model_name,
-            api_key="sk-not-required",
+            api_key=api_key,
             base_url=base_url,
             temperature=0.7,
             timeout=timeout,
@@ -178,8 +188,6 @@ def get_llm(json_mode: bool = False, agent_name: str = "unknown"):
 
     elif provider == "ollama":
         base_url = _provider_model_config(config, provider).get("base_url")
-
-        from langchain_openai import ChatOpenAI
         return ChatOpenAI(
             model=model_name,
             api_key="ollama", # Ollama doesn't require key but some libs expect non-empty
@@ -196,14 +204,14 @@ def get_llm(json_mode: bool = False, agent_name: str = "unknown"):
 def get_provider_info():
     """返回当前提供商和所有模型配置信息的元数据"""
     config = load_config()
-    provider = config.get("LLM_PROVIDER", "ollama")
+    provider = config.get("LLM_PROVIDER", "local")
     model_map = config.get("DEFAULT_MODEL_MAP", {})
     provider_config = _provider_model_config(config, provider)
-    active_model = provider_config.get("default") or config.get("DEFAULT_MODEL", "gemma4:e2b")
+    active_model = provider_config.get("default") or config.get("DEFAULT_MODEL", "gemini-3-flash")
     return {
         "provider": provider,
         "model": active_model,
-        "default_model": config.get("DEFAULT_MODEL", "gemma4:e2b"),
+        "default_model": config.get("DEFAULT_MODEL", "gemini-3-flash"),
         "base_url": provider_config.get("base_url"),
         "review_agent_timeout": _parse_timeout(config.get("REVIEW_AGENT_TIMEOUT"), _default_timeout_for(provider, "chapter_review_agent")),
         "agent_models": config.get("AGENT_MODELS", {}),

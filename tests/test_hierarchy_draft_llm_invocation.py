@@ -8,7 +8,23 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from src import app_api
 from src.agents import chapter_agent, novel_agent, outline_agent, review_agent, worldview_agent, world_agent
+from src.agents import (
+    chapter_content_summary_create_agent,
+    chapter_content_summary_update_agent,
+    chapter_outline_summary_create_agent,
+    chapter_outline_summary_update_agent,
+    outline_summary_create_agent,
+    outline_summary_update_agent,
+)
+from src.common.config_utils import get_config
+from src.common.llm_identity_registry import (
+    REVIEW_NODE_LLM_IDENTITIES,
+    WORKFLOW_NODE_LLM_IDENTITIES,
+    expected_llm_agent_name,
+    validate_llm_identity_registry,
+)
 
 
 class FakeLLM:
@@ -23,6 +39,16 @@ class FakeLLM:
                 "world_id": "world_test",
                 "name": "测试世界",
                 "summary": "world_agent LLM 已扩充：底层规则、资源机制、组织结构、核心冲突、地理边界、风险约束都已形成可执行设定。",
+            },
+            "world_agent_initial_expansion": {
+                "world_id": "world_test",
+                "name": "测试世界",
+                "summary": "world_agent_initial_expansion LLM 已扩充：底层规则、资源机制、组织结构、核心冲突、地理边界、风险约束都已形成可执行设定。",
+            },
+            "world_agent_modify_content": {
+                "world_id": "world_test",
+                "name": "测试世界",
+                "summary": "world_agent_modify_content LLM 已扩充：底层规则、资源机制、组织结构、核心冲突、地理边界、风险约束都已形成可执行设定。",
             },
             "worldview_agent": {
                 "world_id": "world_test",
@@ -42,11 +68,35 @@ class FakeLLM:
                 "name": "测试世界观",
                 "summary": "worldview_agent_modify_content LLM 已扩充：设定边界、核心规则、冲突风险、引用约束都已形成可检索 Canon。",
             },
+            "worldview_agent_human_feedback_modify_content": {
+                "world_id": "world_test",
+                "worldview_id": "wv_test",
+                "name": "测试世界观",
+                "summary": "worldview_agent_human_feedback_modify_content LLM 已扩充：已按人工反馈重写设定边界、核心规则与引用约束。",
+            },
             "novel_agent": {
                 "world_id": "world_test",
                 "novel_id": "novel_test",
                 "name": "测试小说",
                 "summary": "novel_agent LLM 已扩充：故事定位、主角视角、核心冲突、世界规则契合方式、后续大纲约束都已明确。",
+            },
+            "novel_agent_initial_expansion": {
+                "world_id": "world_test",
+                "novel_id": "novel_test",
+                "name": "测试小说",
+                "summary": "novel_agent_initial_expansion LLM 已扩充：故事定位、主角视角、核心冲突、世界规则契合方式、后续大纲约束都已明确。",
+            },
+            "novel_agent_modify_content": {
+                "world_id": "world_test",
+                "novel_id": "novel_test",
+                "name": "测试小说",
+                "summary": "novel_agent_modify_content LLM 已扩充：故事定位、主角视角、核心冲突、世界规则契合方式、后续大纲约束都已明确。",
+            },
+            "novel_agent_human_feedback_modify_content": {
+                "world_id": "world_test",
+                "novel_id": "novel_test",
+                "name": "测试小说",
+                "summary": "novel_agent_human_feedback_modify_content LLM 已扩充：已按人工反馈重写故事定位、主角视角和核心冲突。",
             },
             "outline_agent": {
                 "world_id": "world_test",
@@ -71,6 +121,14 @@ class FakeLLM:
                 "outline_id": "outline_test",
                 "name": "测试大纲",
                 "summary": "outline_agent_modify_content LLM 已扩充：卷章结构、关键转折、冲突升级、高潮收束、设定一致性约束都已明确。",
+            },
+            "outline_agent_human_feedback_modify_content": {
+                "world_id": "world_test",
+                "worldview_id": "wv_test",
+                "novel_id": "novel_test",
+                "outline_id": "outline_test",
+                "name": "测试大纲",
+                "summary": "outline_agent_human_feedback_modify_content LLM 已扩充：已按人工反馈重写卷章结构、关键转折与高潮收束。",
             },
             "chapter_agent": {
                 "world_id": "world_test",
@@ -102,6 +160,16 @@ class FakeLLM:
                 "name": "测试章节",
                 "content": "chapter_agent_modify_content LLM 已生成：正文场景、人物行动、冲突推进、设定执行和段落节奏都已写成可入库正文。",
             },
+            "chapter_agent_human_feedback_modify_content": {
+                "world_id": "world_test",
+                "worldview_id": "wv_test",
+                "novel_id": "novel_test",
+                "outline_id": "outline_test",
+                "chapter_id": "chapter_test",
+                "id": "chapter_test",
+                "name": "测试章节",
+                "content": "chapter_agent_human_feedback_modify_content LLM 已生成：已按人工反馈重写正文场景、人物行动与冲突推进。",
+            },
         }
         body = {
             "payload": payloads[self.agent_name],
@@ -119,9 +187,9 @@ def test_all_hierarchy_modules_content_modification_calls_dedicated_llm():
         return FakeLLM(agent_name, calls)
 
     cases = [
-        (world_agent, "world_agent", "summary", {"world_id": "world_test", "name": "测试世界", "summary": "短"}),
+        (world_agent, "world_agent_modify_content", "summary", {"world_id": "world_test", "name": "测试世界", "summary": "短"}),
         (worldview_agent, "worldview_agent_modify_content", "summary", {"world_id": "world_test", "worldview_id": "wv_test", "name": "测试世界观", "summary": "短"}),
-        (novel_agent, "novel_agent", "summary", {"world_id": "world_test", "novel_id": "novel_test", "name": "测试小说", "summary": "短"}),
+        (novel_agent, "novel_agent_modify_content", "summary", {"world_id": "world_test", "novel_id": "novel_test", "name": "测试小说", "summary": "短"}),
         (outline_agent, "outline_agent_modify_content", "summary", {"world_id": "world_test", "worldview_id": "wv_test", "novel_id": "novel_test", "outline_id": "outline_test", "name": "测试大纲", "summary": "短"}),
         (chapter_agent, "chapter_agent_modify_content", "content", {"world_id": "world_test", "worldview_id": "wv_test", "novel_id": "novel_test", "outline_id": "outline_test", "chapter_id": "chapter_test", "id": "chapter_test", "name": "测试章节", "content": "短"}),
     ]
@@ -158,9 +226,9 @@ def test_all_hierarchy_modules_initial_expansion_calls_dedicated_llm():
         return FakeLLM(agent_name, calls)
 
     cases = [
-        (world_agent, "world_agent", {"world_id": "world_test", "name": "测试世界", "summary": "短"}),
+        (world_agent, "world_agent_initial_expansion", {"world_id": "world_test", "name": "测试世界", "summary": "短"}),
         (worldview_agent, "worldview_agent_initial_expansion", {"world_id": "world_test", "worldview_id": "wv_test", "name": "测试世界观", "summary": "短"}),
-        (novel_agent, "novel_agent", {"world_id": "world_test", "novel_id": "novel_test", "name": "测试小说", "summary": "短"}),
+        (novel_agent, "novel_agent_initial_expansion", {"world_id": "world_test", "novel_id": "novel_test", "name": "测试小说", "summary": "短"}),
         (outline_agent, "outline_agent_initial_expansion", {"world_id": "world_test", "worldview_id": "wv_test", "novel_id": "novel_test", "outline_id": "outline_test", "name": "测试大纲", "summary": "短"}),
         (chapter_agent, "chapter_agent_initial_expansion", {"world_id": "world_test", "worldview_id": "wv_test", "novel_id": "novel_test", "outline_id": "outline_test", "chapter_id": "chapter_test", "id": "chapter_test", "name": "测试章节", "content": "短"}),
     ]
@@ -186,6 +254,145 @@ def test_all_hierarchy_modules_initial_expansion_calls_dedicated_llm():
             assert isinstance(result["expanded_input"], dict)
             assert isinstance(result["payload"], dict)
             assert result["raw_response"]
+
+
+def test_llm_identity_registry_is_unique_and_configured():
+    result = validate_llm_identity_registry((get_config() or {}).get("AGENT_MODELS", {}))
+    assert result["duplicates"] == []
+    assert result["missing_agent_model_keys"] == []
+
+    module_expectations = {
+        "world": world_agent,
+        "worldview": worldview_agent,
+        "novel": novel_agent,
+        "outline": outline_agent,
+        "chapter": chapter_agent,
+        "outline_summary_create": outline_summary_create_agent,
+        "outline_summary_update": outline_summary_update_agent,
+        "chapter_outline_summary_create": chapter_outline_summary_create_agent,
+        "chapter_outline_summary_update": chapter_outline_summary_update_agent,
+        "chapter_intro_summary_create": chapter_content_summary_create_agent,
+        "chapter_intro_summary_update": chapter_content_summary_update_agent,
+        "chapter_content_summary_create": chapter_content_summary_create_agent,
+        "chapter_content_summary_update": chapter_content_summary_update_agent,
+    }
+
+    for agent_type, module in module_expectations.items():
+        assert module.INITIAL_EXPANSION_AGENT_NAME == expected_llm_agent_name(agent_type, "initial_expansion")
+        assert module.MODIFY_CONTENT_AGENT_NAME == expected_llm_agent_name(agent_type, "modify_content")
+        if hasattr(module, "HUMAN_FEEDBACK_AGENT_NAME"):
+            assert module.HUMAN_FEEDBACK_AGENT_NAME == expected_llm_agent_name(agent_type, "modify_content", manual_edit=True)
+
+    assert REVIEW_NODE_LLM_IDENTITIES["outline_world_rules"] == "outline_world_rules_review_agent"
+    assert REVIEW_NODE_LLM_IDENTITIES["chapter_plot_errors"] == "chapter_plot_errors_review_agent"
+
+
+def test_app_api_hydrates_legacy_shared_llm_names_for_all_hierarchy_nodes():
+    legacy_cases = [
+        ("world", "world_agent"),
+        ("worldview", "worldview_agent"),
+        ("novel", "novel_agent"),
+        ("outline", "outline_agent"),
+        ("chapter", "chapter_agent"),
+    ]
+    payload = {
+        "world_id": "world_test",
+        "worldview_id": "wv_test",
+        "novel_id": "novel_test",
+        "outline_id": "outline_test",
+        "chapter_id": "chapter_test",
+        "target_id": "target_test",
+        "name": "测试对象",
+        "summary": "测试摘要",
+        "content": "测试正文",
+    }
+
+    for agent_type, legacy_name in legacy_cases:
+        run = {
+            "agent_type": agent_type,
+            "action": "create",
+            "message": "测试消息",
+            "nodes": [
+                {
+                    "node_id": "initial_expansion",
+                    "input": {"payload": payload, "feedback": ""},
+                    "output": {
+                        "llm_invoked": True,
+                        "agent_name": legacy_name,
+                        "llm_agent_name": legacy_name,
+                        "llm_call": {"llm_agent_name": legacy_name, "prompt": "existing prompt"},
+                    },
+                },
+                {
+                    "node_id": "modify_content",
+                    "input": {"payload": payload, "feedback": "用户反馈", "review_feedback": "审查反馈", "revision_mode": "partial_rewrite"},
+                    "output": {
+                        "llm_invoked": True,
+                        "agent_name": legacy_name,
+                        "llm_agent_name": legacy_name,
+                        "llm_call": {"llm_agent_name": legacy_name, "prompt": "existing prompt"},
+                    },
+                },
+            ],
+        }
+        hydrated = app_api._hydrate_run_prompts(run)
+        expected_initial = expected_llm_agent_name(agent_type, "initial_expansion")
+        expected_modify = expected_llm_agent_name(agent_type, "modify_content")
+        assert hydrated["nodes"][0]["output"]["agent_name"] == expected_initial
+        assert hydrated["nodes"][0]["output"]["llm_agent_name"] == expected_initial
+        assert hydrated["nodes"][0]["output"]["llm_call"]["llm_agent_name"] == expected_initial
+        assert hydrated["nodes"][1]["output"]["agent_name"] == expected_modify
+        assert hydrated["nodes"][1]["output"]["llm_agent_name"] == expected_modify
+        assert hydrated["nodes"][1]["output"]["llm_call"]["llm_agent_name"] == expected_modify
+
+
+def test_app_api_hydrates_manual_edit_nodes_with_human_feedback_identity():
+    cases = [
+        ("worldview", "worldview_agent", "worldview_agent_human_feedback_modify_content"),
+        ("novel", "novel_agent", "novel_agent_human_feedback_modify_content"),
+        ("outline", "outline_agent", "outline_agent_human_feedback_modify_content"),
+        ("chapter", "chapter_agent", "chapter_agent_human_feedback_modify_content"),
+        ("outline_summary_create", "outline_summary_create_agent", "outline_summary_create_human_feedback_modify_llm"),
+        ("outline_summary_update", "outline_summary_update_agent", "outline_summary_update_human_feedback_modify_llm"),
+        ("chapter_outline_summary_create", "chapter_outline_summary_create_agent", "chapter_outline_summary_create_human_feedback_modify_llm"),
+        ("chapter_outline_summary_update", "chapter_outline_summary_update_agent", "chapter_outline_summary_update_human_feedback_modify_llm"),
+        ("chapter_intro_summary_create", "chapter_content_summary_create_agent", "chapter_content_summary_create_human_feedback_modify_llm"),
+        ("chapter_intro_summary_update", "chapter_content_summary_update_agent", "chapter_content_summary_update_human_feedback_modify_llm"),
+    ]
+    payload = {
+        "world_id": "world_test",
+        "worldview_id": "wv_test",
+        "novel_id": "novel_test",
+        "outline_id": "outline_test",
+        "chapter_id": "chapter_test",
+        "target_id": "target_test",
+        "name": "测试对象",
+        "summary": "测试摘要",
+        "content": "测试正文",
+    }
+
+    for agent_type, legacy_name, expected_modify in cases:
+        run = {
+            "agent_type": agent_type,
+            "action": "create",
+            "message": "测试消息",
+            "nodes": [
+                {
+                    "node_id": "modify_content",
+                    "input": {"payload": payload, "feedback": "用户反馈", "review_feedback": "审查反馈", "revision_mode": "partial_rewrite", "manual_edit": True},
+                    "output": {
+                        "llm_invoked": True,
+                        "agent_name": legacy_name,
+                        "llm_agent_name": legacy_name,
+                        "llm_call": {"llm_agent_name": legacy_name, "prompt": "existing prompt"},
+                    },
+                },
+            ],
+        }
+        hydrated = app_api._hydrate_run_prompts(run)
+        assert hydrated["nodes"][0]["output"]["agent_name"] == expected_modify
+        assert hydrated["nodes"][0]["output"]["llm_agent_name"] == expected_modify
+        assert hydrated["nodes"][0]["output"]["llm_call"]["llm_agent_name"] == expected_modify
 
 
 def test_worldview_modify_content_accepts_chinese_output_contract():
@@ -357,6 +564,83 @@ def test_all_prompt_templates_use_structured_sections():
     assert '"errors"' in review_prompt
 
 
+def test_modify_prompts_switch_guidance_by_revision_mode():
+    with (
+        patch.object(world_agent, "get_unified_context", lambda *args, **kwargs: "世界测试上下文"),
+        patch.object(novel_agent, "get_unified_context", lambda *args, **kwargs: "小说测试上下文"),
+        patch.object(outline_agent, "get_unified_context", lambda *args, **kwargs: "大纲测试上下文"),
+        patch.object(chapter_agent, "get_unified_context", lambda *args, **kwargs: "章节测试上下文"),
+        patch.object(worldview_agent, "get_unified_context", lambda *args, **kwargs: "世界观测试上下文"),
+        patch.object(worldview_agent, "_load_world_forbidden_rules", lambda world_id: ["不得出现魔法", "不得出现神"]),
+    ):
+        prompts = {
+            "world": {
+                mode: world_agent.build_modification_prompt(
+                    "update",
+                    {"world_id": "world_test", "target_id": "world_test", "name": "测试世界", "summary": "摘要"},
+                    "消息",
+                    revision_mode=mode,
+                    feedback="修改摘要",
+                )
+                for mode in ("partial_rewrite", "content_rewrite", "full_rewrite")
+            },
+            "worldview": {
+                mode: worldview_agent.build_modification_prompt(
+                    "update",
+                    {"world_id": "world_test", "worldview_id": "wv_test", "target_id": "wv_test", "name": "测试世界观", "summary": "摘要"},
+                    "消息",
+                    revision_mode=mode,
+                    feedback="修改摘要",
+                )
+                for mode in ("partial_rewrite", "content_rewrite", "full_rewrite")
+            },
+            "novel": {
+                mode: novel_agent.build_modification_prompt(
+                    "update",
+                    {"world_id": "world_test", "novel_id": "novel_test", "target_id": "novel_test", "name": "测试小说", "summary": "摘要"},
+                    "消息",
+                    revision_mode=mode,
+                    feedback="修改摘要",
+                )
+                for mode in ("partial_rewrite", "content_rewrite", "full_rewrite")
+            },
+            "outline": {
+                mode: outline_agent.build_modification_prompt(
+                    "update",
+                    {"world_id": "world_test", "novel_id": "novel_test", "outline_id": "outline_test", "target_id": "outline_test", "name": "测试大纲", "summary": "摘要"},
+                    "消息",
+                    revision_mode=mode,
+                    feedback="修改摘要",
+                )
+                for mode in ("partial_rewrite", "content_rewrite", "full_rewrite")
+            },
+            "chapter": {
+                mode: chapter_agent.build_modification_prompt(
+                    "update",
+                    {"world_id": "world_test", "novel_id": "novel_test", "outline_id": "outline_test", "chapter_id": "chapter_test", "target_id": "chapter_test", "name": "测试章节", "content": "摘要"},
+                    "消息",
+                    revision_mode=mode,
+                    feedback="修改摘要",
+                )
+                for mode in ("partial_rewrite", "content_rewrite", "full_rewrite")
+            },
+        }
+
+    for name, mode_prompts in prompts.items():
+        partial_prompt = mode_prompts["partial_rewrite"]
+        content_prompt = mode_prompts["content_rewrite"]
+        full_prompt = mode_prompts["full_rewrite"]
+
+        assert "当前模式：partial_rewrite（指定局部重写）" in partial_prompt, name
+        assert "禁止整篇重写或整体改写结构。" in partial_prompt, name
+        assert "当前模式：content_rewrite（指定内容重写）" in content_prompt, name
+        assert "允许围绕" in content_prompt, name
+        assert "当前模式：full_rewrite（完全重写）" in full_prompt, name
+        assert "允许整体重写" in full_prompt, name
+        assert "禁止整篇重写或整体改写结构。" not in full_prompt, name
+        assert "只允许局部修改，只修改用户指定范围的内容" not in full_prompt, name
+
+
 def test_outline_prompts_require_preserving_long_form_outline_content():
     with patch.object(outline_agent, "get_unified_context", lambda *args, **kwargs: "大纲测试上下文"):
         payload = {
@@ -368,7 +652,14 @@ def test_outline_prompts_require_preserving_long_form_outline_content():
             "summary": "第一卷：北港异象\\n第一章：灯塔误报\\n第二章：登记簿缺页\\n第三章：海沟追查",
         }
         initial_prompt = outline_agent.build_initial_expansion_prompt("create", payload, "请扩充大纲", revision_mode=None, feedback="")
-        modify_prompt = outline_agent.build_modification_prompt("update", payload, "请按意见修改", revision_mode="partial_rewrite", feedback="补强第二章调查链路")
+        modify_prompt = outline_agent.build_modification_prompt(
+            "update",
+            payload,
+            "请按意见修改",
+            revision_mode="partial_rewrite",
+            feedback="把第二章里帝国公民的定义改对",
+            expansion_error="当前帝国公民定义违反世界观设定",
+        )
         initial_contract = initial_prompt.split("只返回合法 JSON：", 1)[1]
         modify_contract = modify_prompt.split("只返回合法 JSON：", 1)[1]
 
@@ -390,16 +681,144 @@ def test_outline_prompts_require_preserving_long_form_outline_content():
     assert payload["summary"] not in initial_contract
 
     assert "你是一名小说大纲修订编辑" in modify_prompt
-    assert "本任务是：修改并扩写（Modify + Expand）" in modify_prompt
-    assert "不得删除未被点名修改的内容。" in modify_prompt
+    assert "【修改模式说明】" in modify_prompt
+    assert "当前模式：partial_rewrite（指定局部重写）" in modify_prompt
+    assert "【用户反馈】" in modify_prompt
+    assert "把第二章里帝国公民的定义改对" in modify_prompt
+    assert "【系统审查问题】" in modify_prompt
+    assert "当前帝国公民定义违反世界观设定" in modify_prompt
+    assert "不得删除未被允许删除的内容。" in modify_prompt
     assert "如果修改范围很小，" in modify_prompt
-    assert "至少保留原文总量不缩短。" in modify_prompt
+    assert "应保持原文主体结构与篇幅基本不变。" in modify_prompt
     assert "Modify：" in modify_prompt
-    assert "Expand：" in modify_prompt
     assert "Validate：" in modify_prompt
     assert "【任务上下文】" in modify_prompt
-    assert "[按修改意见修正并补强后的完整大纲]" in modify_prompt
+    assert "[按意见修正后的完整大纲]" in modify_prompt
+    assert "禁止整篇重写或整体改写结构。" in modify_prompt
     assert payload["summary"] not in modify_contract
+
+
+def test_outline_manual_modify_content_node_uses_human_feedback_llm_and_user_feedback():
+    captured = {}
+
+    def fake_generate(action, payload, message, *, revision_mode=None, feedback="", expansion_error="", llm_agent_name=None):
+        captured["action"] = action
+        captured["payload"] = payload
+        captured["message"] = message
+        captured["revision_mode"] = revision_mode
+        captured["feedback"] = feedback
+        captured["expansion_error"] = expansion_error
+        captured["llm_agent_name"] = llm_agent_name
+        return {
+            "payload": dict(payload),
+            "llm_invoked": True,
+            "agent_name": llm_agent_name or "outline_agent_modify_content",
+            "llm_agent_name": llm_agent_name or "outline_agent_modify_content",
+            "llm_call": {"llm_agent_name": llm_agent_name or "outline_agent_modify_content", "prompt": "测试 prompt", "raw_response_chars": 2},
+            "raw_response": "{}",
+            "parsed_response": {"payload": dict(payload)},
+            "modification_notes": "notes",
+            "change_summary": "summary",
+        }
+
+    state = {
+        "action": "update",
+        "message": "修改大纲",
+        "pending_payload": {
+            "world_id": "world_test",
+            "worldview_id": "wv_test",
+            "novel_id": "novel_test",
+            "outline_id": "outline_test",
+            "name": "测试大纲",
+            "summary": "原始大纲",
+        },
+        "feedback": "用户要求修正帝国公民与殖民地居民的定义",
+        "worldview_review_feedback": "审查指出当前定义违反世界观设定",
+        "revision_mode": "partial_rewrite",
+        "manual_edit": True,
+        "nodes": [],
+        "iterations": 1,
+    }
+
+    with patch.object(outline_agent, "generate_content_modification", fake_generate):
+        result = outline_agent.modify_content_node(state)
+
+    assert captured["feedback"] == "用户要求修正帝国公民与殖民地居民的定义"
+    assert captured["expansion_error"] == "用户要求修正帝国公民与殖民地居民的定义"
+    assert captured["llm_agent_name"] == outline_agent.HUMAN_FEEDBACK_AGENT_NAME
+    assert result["nodes"][-1]["input"]["feedback"] == "用户要求修正帝国公民与殖民地居民的定义"
+    assert result["nodes"][-1]["input"]["review_feedback"] == "审查指出当前定义违反世界观设定"
+    assert result["nodes"][-1]["input"]["manual_edit"] is True
+    assert result["current_node"] == "world_review"
+
+
+def test_manual_edit_modify_nodes_use_human_feedback_llm_and_preserve_user_feedback():
+    cases = [
+        (
+            worldview_agent,
+            worldview_agent.HUMAN_FEEDBACK_AGENT_NAME,
+            {
+                "action": "update",
+                "message": "修改世界观",
+                "pending_payload": {"world_id": "world_test", "worldview_id": "wv_test", "name": "测试世界观", "summary": "原始设定"},
+                "feedback": "用户要求补强资源规则",
+                "world_rule_review_feedback": "审查要求修正规则冲突",
+                "manual_edit": True,
+                "revision_mode": "partial_rewrite",
+                "nodes": [],
+                "iterations": 1,
+            },
+        ),
+        (
+            novel_agent,
+            novel_agent.HUMAN_FEEDBACK_AGENT_NAME,
+            {
+                "action": "update",
+                "message": "修改小说",
+                "pending_payload": {"world_id": "world_test", "novel_id": "novel_test", "name": "测试小说", "summary": "原始故事"},
+                "feedback": "用户要求补强主角动机",
+                "review_feedback": "审查要求修正背景冲突",
+                "manual_edit": True,
+                "revision_mode": "partial_rewrite",
+                "nodes": [],
+                "iterations": 1,
+            },
+        ),
+        (
+            chapter_agent,
+            chapter_agent.HUMAN_FEEDBACK_AGENT_NAME,
+            {
+                "action": "update",
+                "message": "修改章节",
+                "pending_payload": {"world_id": "world_test", "worldview_id": "wv_test", "novel_id": "novel_test", "outline_id": "outline_test", "chapter_id": "chapter_test", "id": "chapter_test", "name": "测试章节", "content": "原始正文"},
+                "feedback": "用户要求补强驾驶舱混乱过程",
+                "outline_review_feedback": "审查要求修正事件顺序",
+                "manual_edit": True,
+                "revision_mode": "partial_rewrite",
+                "nodes": [],
+                "iterations": 1,
+            },
+        ),
+    ]
+
+    for module, expected_agent_name, state in cases:
+        calls = []
+
+        def fake_get_llm(json_mode=False, agent_name="unknown"):
+            assert json_mode is True
+            return FakeLLM(agent_name, calls)
+
+        with (
+            patch.object(module, "get_llm", fake_get_llm),
+            patch.object(module, "get_langfuse_callback", lambda: None),
+            patch.object(module, "get_unified_context", lambda *args, **kwargs: "测试检索上下文"),
+        ):
+            result = module.modify_content_node(state)
+
+        assert calls[-1]["agent_name"] == expected_agent_name
+        assert result["nodes"][-1]["input"]["feedback"] == state["feedback"]
+        assert result["nodes"][-1]["input"]["manual_edit"] is True
+        assert result["nodes"][-1]["output"]["llm_call"]["llm_agent_name"] == expected_agent_name
 
 
 def test_chapter_prompts_preserve_long_form_content_and_keep_modify_separate():
@@ -432,14 +851,133 @@ def test_chapter_prompts_preserve_long_form_content_and_keep_modify_separate():
     assert payload["content"] not in initial_contract
 
     assert "你是一名小说章节修订编辑" in modify_prompt
-    assert "本任务是：修改并扩写（Modify + Expand）" in modify_prompt
-    assert "不得删除未被点名修改的内容。" in modify_prompt
+    assert "【修改模式说明】" in modify_prompt
+    assert "当前模式：partial_rewrite（指定局部重写）" in modify_prompt
+    assert "不得删除未被允许删除的内容。" in modify_prompt
     assert "至少保留原文总量不缩短。" in modify_prompt
     assert "Modify：" in modify_prompt
     assert "Expand：" in modify_prompt
     assert "Validate：" in modify_prompt
     assert "[按修改意见修正并补强后的完整章节正文]" in modify_prompt
+    assert "禁止整篇重写或整体改写结构。" in modify_prompt
     assert payload["content"] not in modify_contract
+
+
+def test_chapter_prompts_embed_parent_world_worldview_novel_and_outline_constraints():
+    class FakeCollection:
+        def __init__(self, docs):
+            self.docs = list(docs)
+
+        def find_one(self, query):
+            for doc in self.docs:
+                if all(doc.get(key) == value for key, value in query.items()):
+                    return doc
+            return None
+
+        def find(self, query):
+            return [
+                doc
+                for doc in self.docs
+                if all(doc.get(key) == value for key, value in query.items())
+            ]
+
+    fake_db = {
+        "worlds": FakeCollection(
+            [
+                {
+                    "world_id": "world_test",
+                    "name": "群岛世界",
+                    "summary": "低魔蒸汽航海世界。",
+                    "forbidden_rules": ["禁止凭空出现现代枪械"],
+                    "basic_settings": {"era": "蒸汽航海"},
+                }
+            ]
+        ),
+        "worldviews": FakeCollection(
+            [
+                {
+                    "worldview_id": "wv_test",
+                    "world_id": "world_test",
+                    "name": "北港灯塔世界观",
+                    "summary": "灯塔公会负责登记与禁航。",
+                }
+            ]
+        ),
+        "novels": FakeCollection(
+            [
+                {
+                    "novel_id": "novel_test",
+                    "world_id": "world_test",
+                    "name": "潮汐疑云",
+                    "summary": "林澈追查港口异常。",
+                    "forbidden_rules": ["主角不能跳过灯塔登记制度"],
+                    "basic_settings": {"protagonist_rule": "必须依靠航图和登记簿破局"},
+                }
+            ]
+        ),
+        "outlines": FakeCollection(
+            [
+                {
+                    "outline_id": "outline_test",
+                    "world_id": "world_test",
+                    "novel_id": "novel_test",
+                    "worldview_id": "wv_test",
+                    "name": "第一卷北港疑云",
+                    "summary": "第一章发现潮汐刻度异常。",
+                    "content": "本卷先写林澈复核登记簿，再暂停离港信号并追查来源。",
+                }
+            ]
+        ),
+        "lore": FakeCollection(
+            [
+                {
+                    "id": "wv_rule_1",
+                    "worldview_id": "wv_test",
+                    "type": "worldview",
+                    "name": "灯塔公会制度",
+                    "path": "组织 > 灯塔公会",
+                    "content": "所有离港船只必须登记潮汐水晶刻度，未登记不得离港。",
+                }
+            ]
+        ),
+        "prose": FakeCollection(
+            [
+                {
+                    "id": "chapter_outline_test",
+                    "scene_id": "chapter_outline_test",
+                    "name": "第一章章节大纲",
+                    "content": "林澈先复核登记簿，再根据制度暂停离港信号。",
+                }
+            ]
+        ),
+    }
+
+    with (
+        patch.object(chapter_agent, "get_unified_context", lambda *args, **kwargs: "章节测试上下文"),
+        patch.object(chapter_agent, "get_mongodb_db", lambda: fake_db),
+    ):
+        payload = {
+            "world_id": "world_test",
+            "worldview_id": "wv_test",
+            "novel_id": "novel_test",
+            "outline_id": "outline_test",
+            "chapter_outline_id": "chapter_outline_test",
+            "chapter_id": "chapter_test",
+            "id": "chapter_test",
+            "name": "第一章：坠落",
+            "content": "林澈在北港灯塔核对登记簿，发现潮汐水晶刻度异常。",
+        }
+        initial_prompt = chapter_agent.build_initial_expansion_prompt("create", payload, "请扩充章节", revision_mode=None, feedback="")
+        modify_prompt = chapter_agent.build_modification_prompt("update", payload, "请按意见修改章节", revision_mode="partial_rewrite", feedback="补强禁航信号的执行过程")
+
+    for prompt in (initial_prompt, modify_prompt):
+        assert "【父级强约束】" in prompt
+        assert "禁止凭空出现现代枪械" in prompt
+        assert "必须依靠航图和登记簿破局" in prompt
+        assert "第一章发现潮汐刻度异常" in prompt
+        assert "灯塔公会制度" in prompt
+        assert "所有离港船只必须登记潮汐水晶刻度" in prompt
+        assert "林澈先复核登记簿，再根据制度暂停离港信号" in prompt
 
 
 def test_outline_generation_rejects_over_simplified_long_form_output():
@@ -754,6 +1292,8 @@ def test_review_nodes_are_split_into_dedicated_files():
 if __name__ == "__main__":
     test_all_hierarchy_modules_content_modification_calls_dedicated_llm()
     test_all_hierarchy_modules_initial_expansion_calls_dedicated_llm()
+    test_llm_identity_registry_is_unique_and_configured()
+    test_app_api_hydrates_legacy_shared_llm_names_for_all_hierarchy_nodes()
     test_five_agents_are_independent_state_graph_instances()
     test_agent_methods_have_chinese_annotations()
     test_review_nodes_are_split_into_dedicated_files()

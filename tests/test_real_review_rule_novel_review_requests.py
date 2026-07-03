@@ -15,7 +15,7 @@ def test_real_review_rule_novel_review_requests():
             {"world_id": chain["world_id"], "worldview_id": chain["worldview_id"], "novel_id": chain["novel_id"], "name": f"Outline Review {chain['suffix']}", "summary": "小说审核真实测试大纲"},
             "真实测试小说审核节点",
         )
-        node = assert_review_node(run, "novel_review", "outline_novel_review_agent")
+        node = assert_review_node(run, "novel_review", "outline_novel_rules_review_agent")
         assert node["input"]["payload"].get("novel_id") == chain["novel_id"], node
     finally:
         cleanup_world(chain["world_id"])

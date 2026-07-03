@@ -1,7 +1,9 @@
 # 世界层级与 Agent 迭代工作台产品需求文档
 
 更新日期：2026-04-29  
-适用范围：`/worlds` 世界列表与世界详情、`/novels` 小说列表与小说详情、小说下属 `/outlines` 与 `/chapters` 管理页、`/lore` 世界观资料库、`/visualizer` 世界观图谱、五模块 Agent 工作流页、后端层级 API、真实 requests 测试。
+适用范围：`frontend/` React 主前端（`http://127.0.0.1:5174`）下的 `/worlds` 世界列表与世界详情、`/novels` 小说列表与小说详情、小说下属 `/outlines` 与 `/chapters` 管理页、`/lore` 世界观资料库、`/visualizer` 世界观图谱、五模块 Agent 工作流页、后端层级 API、真实 requests 测试。
+
+> **前端策略**：React 为唯一产品演进目标；NiceGUI `ui/` 已废弃，不得新增平行页面。见 [frontend_strategy.md](./frontend_strategy.md)。
 
 ## 1. 产品目标
 
